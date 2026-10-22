@@ -32,6 +32,7 @@ the machine that applied it (ignored by git).
 | `ff-poc-be-push` | ff-poc-be tag builds | push and retag `ff-poc-be` images |
 | `ff-poc-deploy-<stage>` | hub deploy job in that stage's environment | pull the image, list parameter names; reading or decrypting a value is denied |
 | `ff-poc-be-runtime-<stage>` | the BE server | read and decrypt `/ff-poc/<stage>/be/*` only, so staging can never read prod |
+| S3 `ff-poc-web-<stage>-<account>` + CloudFront (`web.tf`) | the FE web app | private bucket; only that stage's distribution reads it; the stage's deploy role writes it and refreshes the distribution |
 
 The runtime role would be assumed only by ECS tasks in real use. This POC has no ECS, so the hub
 deploy job may assume it too and hand its short-lived credentials to the container it runs.
