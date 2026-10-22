@@ -79,8 +79,9 @@ jobs:
           set -euo pipefail
           for app in $APPS; do
             case "$app" in
-              be) docker buildx imagetools inspect "ghcr.io/${OWNER,,}/ff-poc-be:$V" >/dev/null \
-                    || { echo "::error::Image ff-poc-be:$V is gone; rollback would fail."; exit 1; } ;;
+              # The image is in ECR, which this job cannot see; ECR keeps the 10 newest images.
+              be) gh release view "prod/v$V" -R "$OWNER/ff-poc-be" >/dev/null 2>&1 \
+                    || { echo "::error::ff-poc-be has no prod/v$V release; rollback would fail."; exit 1; } ;;
               fe) gh release view "prod/v$V" -R "$OWNER/ff-poc-fe" --json assets --jq '.assets[].name' | grep -qxE 'web-build(-prod)?\.zip' \
                     || { echo "::error::Release prod/v$V in ff-poc-fe has no web build; rollback would fail."; exit 1; } ;;
             esac
