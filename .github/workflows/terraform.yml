@@ -1,0 +1,57 @@
+name: Terraform
+
+# Checks infra/ on every change. The plan is simulated while the AWS variables are mocks
+# (account 000000000000); with real ones it would assume TF_ROLE_ARN through OIDC and plan.
+on:
+  pull_request:
+    paths: ['infra/**', 'config/be/secrets.list']
+  push:
+    branches: [main]
+    paths: ['infra/**', 'config/be/secrets.list']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TF_ROLE_ARN: ${{ vars.TF_ROLE_ARN }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+
+      - name: Plan (simulated)
+        run: |
+          set -euo pipefail
+          for v in AWS_REGION TF_ROLE_ARN TF_STATE_BUCKET; do
+            [ -n "${!v}" ] || { echo "::error::Repo variable $v is not set."; exit 1; }
+          done
+          if [[ "$TF_ROLE_ARN" == *":000000000000:"* ]]; then
+            {
+              echo "### Terraform plan (simulated)"
+              echo "The AWS variables are mocks, so nothing was planned. With real ones this job would:"
+              echo "1. assume \`$TF_ROLE_ARN\` through GitHub OIDC (no AWS keys stored)"
+              echo "2. \`terraform init\` with state in \`s3://$TF_STATE_BUCKET/hub/terraform.tfstate\` ($AWS_REGION)"
+              echo "3. \`terraform plan\`, and \`apply\` after an approval"
+              echo
+              echo "Secret names it grants access to: $(grep -Ev '^\s*(#|$)' ../config/be/secrets.list | paste -sd, -)"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Mock AWS variables: plan skipped."
+          else
+            echo "::error::Real AWS variables are set; wire aws-actions/configure-aws-credentials and the S3 backend first."
+            exit 1
+          fi

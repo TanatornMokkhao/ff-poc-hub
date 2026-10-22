@@ -6,7 +6,10 @@ The one place that says what runs where. App repos build and tag; this repo depl
 | --- | --- |
 | `staging/versions.yaml` | What staging runs. App repos commit here when they tag an rc. |
 | `prod/versions.yaml` | What production runs. Changes only through a PR. |
-| `config/<stage>.json` | Runtime config and flags the FE reads at startup. |
+| `config/fe/<stage>.json` | Runtime config and flags the FE reads at startup (public). |
+| `config/be/<stage>.env` | BE settings that are not secret. |
+| `config/be/secrets.list` | Names of BE secrets; values live in AWS Parameter Store, never in git or GitHub. |
+| `infra/` | Terraform example for the AWS side (not applied). See [infra/README.md](infra/README.md). |
 | `scripts/deploy.sh` | Deploys a stage: BE first, then FE. |
 
 Sites: [staging](https://tanatornmokkhao.github.io/ff-poc-hub/staging/) · [prod](https://tanatornmokkhao.github.io/ff-poc-hub/prod/)

@@ -36,8 +36,8 @@ jobs:
           if git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then CHANGED=$(git diff --name-only "$BEFORE" HEAD)
           else CHANGED=$(git ls-files); fi
           echo "$CHANGED"
-          grep -qE '^(staging/|config/staging|scripts/)' <<< "$CHANGED" && echo "staging=true" >> "$GITHUB_OUTPUT" || true
-          grep -qE '^(prod/|config/prod)' <<< "$CHANGED" && echo "prod=true" >> "$GITHUB_OUTPUT" || true
+          grep -qE '^(staging/|config/(be|fe)/staging\.|config/be/secrets\.list|scripts/)' <<< "$CHANGED" && echo "staging=true" >> "$GITHUB_OUTPUT" || true
+          grep -qE '^(prod/|config/(be|fe)/prod\.|config/be/secrets\.list)' <<< "$CHANGED" && echo "prod=true" >> "$GITHUB_OUTPUT" || true
 
   staging:
     needs: changes
