@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.10"
 
   required_providers {
     aws = {
@@ -8,13 +8,12 @@ terraform {
     }
   }
 
-  # A real setup keeps state in S3 with locking, e.g.:
-  # backend "s3" {
-  #   bucket       = "ff-poc-terraform-state"
-  #   key          = "hub/terraform.tfstate"
-  #   region       = "ap-southeast-1"
-  #   use_lockfile = true
-  # }
+  # Bucket and region come from the Terraform workflow (bucket made by bootstrap/).
+  backend "s3" {
+    key          = "hub/terraform.tfstate"
+    use_lockfile = true
+    encrypt      = true
+  }
 }
 
 provider "aws" {
