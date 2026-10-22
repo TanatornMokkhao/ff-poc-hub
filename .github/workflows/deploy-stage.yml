@@ -31,7 +31,11 @@ jobs:
           if git show-ref -q refs/heads/gh-pages; then git worktree add pages gh-pages
           else git worktree add --orphan -b gh-pages pages; fi
 
+      # BE_ENV and FE_ENV are this environment's secrets: staging and production hold different values.
       - run: bash scripts/deploy.sh "${{ inputs.stage }}" pages
+        env:
+          BE_ENV: ${{ secrets.BE_ENV }}
+          FE_ENV: ${{ secrets.FE_ENV }}
 
       - name: Publish
         working-directory: pages
