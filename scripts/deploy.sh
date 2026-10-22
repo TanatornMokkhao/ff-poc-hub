@@ -25,7 +25,13 @@ keys() { lines | sed 's/=.*//' | sort -u; }
 secret_keys() { grep -E '#[[:space:]]*secret[[:space:]]*$' | keys; }
 public_keys() { lines | grep -Ev '#[[:space:]]*secret[[:space:]]*$' | keys; }
 # .env.example of an app at the release being deployed; empty when that release has none.
-example() { gh api "repos/$OWNER/ff-poc-$1/contents/.env.example?ref=$STAGE/v$2" -H "Accept: application/vnd.github.raw" 2>/dev/null || true; }
+# On a 404, gh still prints the error body to stdout, so only a successful call's output counts.
+example() {
+  local out
+  if out=$(gh api "repos/$OWNER/ff-poc-$1/contents/.env.example?ref=$STAGE/v$2" -H "Accept: application/vnd.github.raw" 2>/dev/null); then
+    printf '%s\n' "$out"
+  fi
+}
 
 BE=$(get be)
 FE=$(get fe)
