@@ -32,11 +32,12 @@ jobs:
           if git show-ref -q refs/heads/gh-pages; then git worktree add pages gh-pages
           else git worktree add --orphan -b gh-pages pages; fi
 
-      # Public values come from config/ in git. The BE_<KEY> secrets of this environment stand in
-      # for Parameter Store until there is a real AWS account.
+      # FE values come from config/fe in git. This environment's BE_<KEY> variables and secrets
+      # stand in for Parameter Store until there is a real AWS account.
       - run: bash scripts/deploy.sh "${{ inputs.stage }}" pages
         env:
           AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          VARS_JSON: ${{ toJSON(vars) }}
           SECRETS_JSON: ${{ toJSON(secrets) }}
 
       - name: Publish

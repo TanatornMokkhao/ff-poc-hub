@@ -3,10 +3,10 @@
 #   scripts/deploy.sh staging|prod <pages-dir>
 # Which keys each app needs: its .env.example at the tag being deployed ("# secret" marks a secret).
 # Where the values are:
-#   config/be/<stage>.env    BE values that are not secret (git, reviewed in PRs)
-#   secret store             BE secrets. Real: Parameter Store /ff-poc/<stage>/be/<KEY>.
-#                            Here (no AWS): GitHub environment secrets named BE_<KEY>, in SECRETS_JSON.
-#   config/fe/<stage>.json   FE values under "runtime" (public: the browser reads them)
+#   BE                       Real: Parameter Store /ff-poc/<stage>/be/<KEY> (String, or SecureString
+#                            for a secret), read by the server. Here (no AWS): this GitHub environment's
+#                            variables BE_<KEY> (VARS_JSON) and secrets BE_<KEY> (SECRETS_JSON).
+#   config/fe/<stage>.json   FE values under "runtime" (git; public: the browser reads them)
 # Everything is checked before anything is deployed; a missing key stops the deploy and names it.
 set -euo pipefail
 
@@ -14,10 +14,11 @@ STAGE="$1"
 PAGES="$2"
 FILE="$STAGE/versions.yaml"
 OWNER="tanatornmokkhao"
-BE_CONF="config/be/$STAGE.env"
 FE_CONF="config/fe/$STAGE.json"
 SJ="${SECRETS_JSON:-}"
 [ -n "$SJ" ] || SJ='{}'
+VJ="${VARS_JSON:-}"
+[ -n "$VJ" ] || VJ='{}'
 
 get() { sed -n "s/^$1:[[:space:]]*\([^[:space:]#]*\).*/\1/p" "$FILE"; }
 lines() { grep -Ev '^[[:space:]]*(#|$)' || true; }
@@ -32,6 +33,9 @@ example() {
     printf '%s\n' "$out"
   fi
 }
+# BE keys set in a store (variables or secrets JSON), without the BE_ prefix.
+be_keys() { jq -r 'keys[] | select(startswith("BE_")) | sub("^BE_"; "")' <<<"$1" | sort -u; }
+be_val() { jq -r --arg k "BE_$2" '.[$k] // empty' <<<"$1"; }
 
 BE=$(get be)
 FE=$(get fe)
@@ -41,23 +45,26 @@ PROBLEMS=()
 if [ "$BE" != none ]; then
   BE_EXAMPLE=$(example be "$BE")
   ENVFILE=$(mktemp)
-  lines < "$BE_CONF" > "$ENVFILE"
   if [ -z "$BE_EXAMPLE" ]; then
-    echo "be $BE has no .env.example: its settings are not checked."
+    echo "be $BE has no .env.example: its settings are not checked; passing every BE_ value."
+    for k in $(be_keys "$VJ"); do printf '%s=%s\n' "$k" "$(be_val "$VJ" "$k")" >> "$ENVFILE"; done
+    for k in $(be_keys "$SJ"); do printf '%s=%s\n' "$k" "$(be_val "$SJ" "$k")" >> "$ENVFILE"; done
   else
-    for k in $(comm -12 <(keys < "$BE_CONF") <(secret_keys <<<"$BE_EXAMPLE")); do
-      PROBLEMS+=("be: $k is a secret but is in $BE_CONF; move it to the secret store")
+    for k in $(comm -12 <(be_keys "$VJ") <(secret_keys <<<"$BE_EXAMPLE")); do
+      PROBLEMS+=("be: $k is a secret but is a visible variable (BE_$k) in $STAGE; delete it and set it as a secret")
     done
-    for k in $(comm -23 <(public_keys <<<"$BE_EXAMPLE") <(keys < "$BE_CONF")); do
-      PROBLEMS+=("be: $k has no value in $BE_CONF")
-    done
-    for k in $(secret_keys <<<"$BE_EXAMPLE"); do
-      v=$(jq -r --arg k "BE_$k" '.[$k] // empty' <<<"$SJ")
-      if [ -z "$v" ]; then PROBLEMS+=("be: secret $k has no value in the $STAGE secret store (BE_$k)")
+    for k in $(public_keys <<<"$BE_EXAMPLE"); do
+      v=$(be_val "$VJ" "$k")
+      if [ -z "$v" ]; then PROBLEMS+=("be: $k has no value in $STAGE (variable BE_$k)")
       else printf '%s=%s\n' "$k" "$v" >> "$ENVFILE"; fi
     done
-    EXTRA=$(comm -13 <(keys <<<"$BE_EXAMPLE") <(keys < "$BE_CONF") | paste -sd, -)
-    [ -z "$EXTRA" ] || echo "::warning::$BE_CONF has keys be $BE does not read: $EXTRA"
+    for k in $(secret_keys <<<"$BE_EXAMPLE"); do
+      v=$(be_val "$SJ" "$k")
+      if [ -z "$v" ]; then PROBLEMS+=("be: secret $k has no value in $STAGE (secret BE_$k)")
+      else printf '%s=%s\n' "$k" "$v" >> "$ENVFILE"; fi
+    done
+    EXTRA=$(comm -13 <(keys <<<"$BE_EXAMPLE") <(cat <(be_keys "$VJ") <(be_keys "$SJ") | sort -u) | paste -sd, -)
+    [ -z "$EXTRA" ] || echo "::warning::$STAGE has BE_ values that be $BE does not read: $EXTRA"
     echo "be $BE needs public: $(public_keys <<<"$BE_EXAMPLE" | paste -sd, -)"
     echo "be $BE needs secret: $(secret_keys <<<"$BE_EXAMPLE" | paste -sd, -) (real: /ff-poc/$STAGE/be/<KEY>, role ${AWS_ROLE_ARN:-not set})"
   fi
