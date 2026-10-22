@@ -1,0 +1,11 @@
+{
+  "env": "staging",
+  "apiBaseUrl": "https://api.staging.example.com",
+  "flags": {
+    "welcomeBanner": true
+  },
+  "versions": {
+    "be": "1.0.0-rc.2",
+    "fe": "1.0.0-rc.2"
+  }
+}
