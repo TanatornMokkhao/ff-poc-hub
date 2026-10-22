@@ -90,8 +90,8 @@ jobs:
           for app in $(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}'); do
             sha=$(git -C "$app" rev-parse HEAD)
             repo="ff-poc-$app"
-            existing=$(gh api "repos/$OWNER/$repo/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null || true)
-            if [ -n "$existing" ]; then
+            # A missing tag is a 404; judge by the exit code, never by what gh printed.
+            if existing=$(gh api "repos/$OWNER/$repo/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null); then
               [ "$existing" = "$sha" ] || { echo "::error::$repo already has $TAG on ${existing::7}, not the pinned ${sha::7}."; exit 1; }
               echo "$repo already tagged $TAG on ${sha::7}"
             else
