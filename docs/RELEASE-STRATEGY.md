@@ -118,9 +118,11 @@ Mobile ใช้กฎ tag เดียวกัน แต่ deploy ผ่า�
 
 | เรื่อง | ใน POC |
 | --- | --- |
-| ชื่อ tag | คนสร้างในหน้า Releases เป็น `staging/vX.Y.Z` (รอบทดสอบซ้ำของเลขเดิม: `staging/vX.Y.Z-2`) และ `prod/vX.Y.Z` แทน `vX.Y.Z-rc.N` / `vX.Y.Z` กฎยังเหมือนเดิม: prod ต้องมี staging ของเลขเดียวกันบน commit เดียวกัน |
+| คนกด release ที่ไหน | **ที่ hub ที่เดียว** แบบ expt-hub: hub ใช้ submodule ปักหมุด commit ของ `be/` และ `fe/` คนสร้าง release ใน hub แล้ว hub ไป tag commit ที่ปักหมุดไว้ในแต่ละ app repo ด้วย tag เดียวกัน คนไม่ต้อง tag ใน app repo |
+| ชื่อ tag | `staging/vX.Y.Z-rc.N` (รอบทดสอบ) และ `prod/vX.Y.Z` เลขเดียวกันทุก app ในรอบนั้น (ต่างจากเอกสารที่ให้แต่ละ app มีเลขของตัวเอง) prod ต้องอยู่บน hub commit เดียวกับ rc ที่ผ่าน |
+| build ครั้งเดียว | app build ตอน rc แรกของ commit นั้น rc ถัดไปที่ commit ไม่เปลี่ยน และ prod ใช้ build เดิม (BE retag image, FE ใช้ zip และไฟล์แอปจาก release ของ rc) |
 | ชื่อ repo กลาง | `ff-poc-hub` (เอกสารเรียก `deploy`) app repo คือ `ff-poc-be` และ `ff-poc-fe` (เว็บ + แอป Capacitor อยู่ repo เดียวกัน) |
-| ส่วนที่อัปเดต hub | ย้ายเป็น reusable workflow `.github/workflows/promote.yml` ใน hub แล้ว app repo เรียกใช้ตัวเดียวกัน |
+| อัปเดต pin | workflow **Bump submodule pins** เปิด PR ย้าย pin ไปที่ `main` ล่าสุดของแต่ละ app (แบบ auto-bump ของ expt-hub) |
 | FE build ครั้งเดียว | FE อ่าน `config.json` ตอนเปิดแอป hub ใส่ `config/<stage>.json` ตอน deploy จึงใช้ web build ตัวเดียวกันได้ทั้ง staging และ prod |
 | BE deploy | จำลอง: pull image จาก GHCR แล้วรันบน runner ตรวจ `/health` และ `/version` |
 | FE deploy | GitHub Pages ของ hub: `/staging/` และ `/prod/` |

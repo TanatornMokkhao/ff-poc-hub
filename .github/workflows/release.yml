@@ -1,0 +1,115 @@
+name: Release
+
+# Like expt-hub, with release candidates. A person creates a release in THIS repo:
+#   staging/vX.Y.Z-rc.N  a test round of X.Y.Z (rc.1, rc.2 … as fixes land)
+#   prod/vX.Y.Z          must sit on the same hub commit as one of the X.Y.Z rcs: the same
+#                        pins, already tested.
+# For every submodule the workflow tags the pinned commit in the sub-repo with the same tag,
+# waits for the sub-repo's Release run (an rc builds once, prod reuses the rc build), then
+# writes <env>/versions.yaml here, which the Deploy workflow deploys (BE first, then FE).
+on:
+  push:
+    tags: ['staging/v*', 'prod/v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Read the tag
+        id: t
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "::error::Set the DEPLOY_REPO_TOKEN secret in this repo."; exit 1; }
+          if [[ "$TAG" =~ ^staging/v([0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+)$ ]]; then STAGE=staging
+          elif [[ "$TAG" =~ ^prod/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then STAGE=prod
+          else echo "::error::Tag $TAG must be staging/vX.Y.Z-rc.N or prod/vX.Y.Z."; exit 1; fi
+          echo "stage=$STAGE" >> "$GITHUB_OUTPUT"
+          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+          token: ${{ secrets.DEPLOY_REPO_TOKEN }}
+
+      - name: prod must use the pins that passed staging
+        if: ${{ steps.t.outputs.stage == 'prod' }}
+        run: |
+          V="${{ steps.t.outputs.version }}"
+          RC=$(git tag --points-at "$GITHUB_SHA" | grep -E "^staging/v$V-rc\.[0-9]+$" | sort -V | tail -1 || true)
+          if [ -z "$RC" ]; then
+            LAST=$(git tag --list "staging/v$V-rc.*" --sort=-v:refname | head -1)
+            if [ -n "$LAST" ]; then
+              echo "::error::prod/v$V is on ${GITHUB_SHA::7}, but the last rc $LAST is on $(git rev-list -n1 "$LAST" | cut -c1-7). Tag prod on that commit."
+            else
+              echo "::error::No staging/v$V-rc.N in the hub: $V never went to staging."
+            fi
+            exit 1
+          fi
+          echo "prod/v$V uses the pins tested as $RC"
+
+      - name: Tag the pinned commit in each sub-repo
+        run: |
+          set -euo pipefail
+          : > pins.txt
+          for app in $(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}'); do
+            sha=$(git -C "$app" rev-parse HEAD)
+            repo="ff-poc-$app"
+            existing=$(gh api "repos/$OWNER/$repo/git/ref/tags/$TAG" --jq .object.sha 2>/dev/null || true)
+            if [ -n "$existing" ]; then
+              [ "$existing" = "$sha" ] || { echo "::error::$repo already has $TAG on ${existing::7}, not the pinned ${sha::7}."; exit 1; }
+              echo "$repo already tagged $TAG on ${sha::7}"
+            else
+              gh api "repos/$OWNER/$repo/git/refs" -f ref="refs/tags/$TAG" -f sha="$sha" >/dev/null
+              echo "tagged $repo $TAG -> ${sha::7}"
+            fi
+            echo "$app $repo $sha" >> pins.txt
+          done
+
+      - name: Wait for each sub-repo's Release run
+        run: |
+          set -euo pipefail
+          V="${{ steps.t.outputs.version }}"
+          ready() {
+            case "$1" in
+              be) docker buildx imagetools inspect "ghcr.io/${OWNER,,}/ff-poc-be:$V" >/dev/null 2>&1 ;;
+              fe) gh release view "$TAG" -R "$OWNER/ff-poc-fe" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx web-build.zip ;;
+            esac
+          }
+          while read -r app repo sha; do
+            for _ in $(seq 1 80); do
+              ready "$app" && { echo "$app ready"; continue 2; }
+              sleep 15
+            done
+            echo "::error::$repo did not finish $TAG in 20 minutes; open its Release run."; exit 1
+          done < pins.txt
+
+      - name: Record what $stage runs (this deploys it)
+        run: |
+          set -euo pipefail
+          STAGE="${{ steps.t.outputs.stage }}"; V="${{ steps.t.outputs.version }}"
+          git fetch -q origin main && git switch -q -C main origin/main
+          while read -r app repo sha; do
+            sed -i -E "s/^($app:[[:space:]]*)[^[:space:]#]+.*/\1$V   # ${sha::7}/" "$STAGE/versions.yaml"
+          done < pins.txt
+          sed -i -E "s/^(mobile:[[:space:]]*)[^[:space:]#]+/\1$V/" "$STAGE/versions.yaml"
+          cat "$STAGE/versions.yaml"
+          git config user.name "ff-poc release bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qam "$STAGE: release $V ($TAG)"
+          git push -q origin main
+          {
+            echo "### $TAG"
+            echo '```yaml'; cat "$STAGE/versions.yaml"; echo '```'
+            echo "The Deploy workflow now deploys $STAGE$([ "$STAGE" = prod ] && echo ' after approval')."
+          } >> "$GITHUB_STEP_SUMMARY"

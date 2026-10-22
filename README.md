@@ -13,10 +13,13 @@ Sites: [staging](https://tanatornmokkhao.github.io/ff-poc-hub/staging/) · [prod
 
 The full release strategy is in [docs/RELEASE-STRATEGY.md](docs/RELEASE-STRATEGY.md).
 
-## Release in one screen
+`be/` and `fe/` are submodules: the hub pins the exact commit of each app that a release ships. The FE repo holds the web app and the Capacitor mobile app.
 
-1. Merge PRs into `main` of `ff-poc-be` or `ff-poc-fe`.
-2. In that repo's Releases page, create a release with a new tag `staging/vX.Y.Z` on `main` (a second test round of the same version: `staging/vX.Y.Z-2`). CI builds once and commits the version to `staging/versions.yaml`; staging deploys.
-3. When staging passes, create a release with tag `prod/vX.Y.Z` on the same commit. CI refuses a commit with no `staging/vX.Y.Z…` tag, reuses that staging build, and opens a PR here changing `prod/versions.yaml`.
-4. Merge the PR, then approve the `production` deployment.
-5. Rollback: revert the commit in `prod/versions.yaml` and merge.
+## Release in one screen (all from this repo)
+
+1. Merge PRs into `main` of `ff-poc-be` / `ff-poc-fe`.
+2. Run **Bump submodule pins** here and merge its PR, so the pins point at those commits.
+3. **Releases → Draft a new release** here, tag `staging/v1.0.0-rc.1` on `main`, Publish. The hub tags the pinned commit in each app repo, each app builds once (web, image, Android, iOS), and staging deploys. The apps go to the test channels (simulated).
+4. A fix during testing: merge it in the app repo, bump the pins, then release `staging/v1.0.0-rc.2`. An app whose commit did not change reuses its rc.1 build.
+5. Staging passes: release `prod/v1.0.0` **on the same hub commit as the rc that passed** (Target: pick that rc's tag or commit). Each app reuses that rc's build; approve the `production` deployment here and the `app-store` step in `ff-poc-fe` (simulated).
+6. Rollback: revert the last commit in `prod/versions.yaml` and approve the deploy.

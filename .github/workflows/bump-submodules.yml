@@ -1,0 +1,51 @@
+name: Bump submodule pins
+
+# Like expt-hub: opens (or updates) one PR that moves every submodule pin to its repo's
+# main HEAD. Merge it before tagging staging/vX.Y.Z so the release has the latest code.
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 */2 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bump-submodules
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+      BRANCH: chore/bump-submodules
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0
+          token: ${{ secrets.DEPLOY_REPO_TOKEN }}
+      - name: Move pins to main HEAD
+        run: |
+          set -euo pipefail
+          git config user.name "ff-poc bump bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          lines=""
+          for app in $(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}'); do
+            old=$(git -C "$app" rev-parse HEAD)
+            git -C "$app" fetch -q origin main
+            new=$(git -C "$app" rev-parse origin/main)
+            [ "$old" = "$new" ] && continue
+            git -C "$app" checkout -q "$new"
+            git add "$app"
+            lines="$lines- \`$app\` ${old::7} → ${new::7}: $(git -C "$app" log --format='%s' "$old..$new" | head -5 | paste -sd ';' -)"$'\n'
+          done
+          if git diff --cached --quiet; then echo "All pins are current."; exit 0; fi
+          git switch -c "$BRANCH"
+          git commit -qm "chore: bump submodule pins to main"
+          git push -qf origin "$BRANCH"
+          printf 'Moves the submodule pins to each repo'"'"'s main HEAD.\n\n%s' "$lines" > body.md
+          URL=$(gh pr list --head "$BRANCH" --json url --jq '.[0].url // empty')
+          if [ -n "$URL" ]; then gh pr edit "$URL" --body-file body.md; else URL=$(gh pr create --base main --head "$BRANCH" --title "chore: bump submodule pins" --body-file body.md); fi
+          echo "PR: $URL" >> "$GITHUB_STEP_SUMMARY"

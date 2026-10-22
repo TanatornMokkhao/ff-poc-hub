@@ -1,0 +1,6 @@
+[submodule "be"]
+	path = be
+	url = https://github.com/TanatornMokkhao/ff-poc-be.git
+[submodule "fe"]
+	path = fe
+	url = https://github.com/TanatornMokkhao/ff-poc-fe.git
