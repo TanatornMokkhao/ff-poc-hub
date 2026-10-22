@@ -18,9 +18,12 @@ variable "region" {
   default = "ap-southeast-1"
 }
 
-variable "github_repo" {
+# GitHub's immutable OIDC subject: owner and repo names with their numeric ids, so a repo created
+# later under the same name never matches. Read it with:
+#   gh api repos/<owner>/<repo>/actions/oidc/customization/sub --jq .sub_claim_prefix
+variable "hub_sub_prefix" {
   type    = string
-  default = "TanatornMokkhao/ff-poc-hub"
+  default = "repo:TanatornMokkhao@111348335/ff-poc-hub@1429529487"
 }
 
 provider "aws" {
@@ -101,7 +104,7 @@ data "aws_iam_policy_document" "terraform_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:environment:infra"]
+      values   = ["${var.hub_sub_prefix}:environment:infra"]
     }
   }
 }
