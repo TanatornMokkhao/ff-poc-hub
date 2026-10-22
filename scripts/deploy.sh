@@ -30,7 +30,7 @@ fi
 
 if [ "$FE" != none ]; then
   WORK=$(mktemp -d)
-  gh release download "v$FE" -R "$OWNER/ff-poc-fe" -p web-build.zip -D "$WORK"
+  gh release download "$STAGE/v$FE" -R "$OWNER/ff-poc-fe" -p web-build.zip -D "$WORK"
   rm -rf "${PAGES:?}/$STAGE" && mkdir -p "$PAGES/$STAGE"
   unzip -q "$WORK/web-build.zip" -d "$PAGES/$STAGE"
   jq --arg be "$BE" --arg fe "$FE" '. + {versions: {be: $be, fe: $fe}}' "config/$STAGE.json" > "$PAGES/$STAGE/config.json"

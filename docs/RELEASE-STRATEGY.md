@@ -118,6 +118,7 @@ Mobile ใช้กฎ tag เดียวกัน แต่ deploy ผ่า�
 
 | เรื่อง | ใน POC |
 | --- | --- |
+| ชื่อ tag | คนสร้างในหน้า Releases เป็น `staging/vX.Y.Z` (รอบทดสอบซ้ำของเลขเดิม: `staging/vX.Y.Z-2`) และ `prod/vX.Y.Z` แทน `vX.Y.Z-rc.N` / `vX.Y.Z` กฎยังเหมือนเดิม: prod ต้องมี staging ของเลขเดียวกันบน commit เดียวกัน |
 | ชื่อ repo กลาง | `ff-poc-hub` (เอกสารเรียก `deploy`) app repo คือ `ff-poc-be` และ `ff-poc-fe` (เว็บ + แอป Capacitor อยู่ repo เดียวกัน) |
 | ส่วนที่อัปเดต hub | ย้ายเป็น reusable workflow `.github/workflows/promote.yml` ใน hub แล้ว app repo เรียกใช้ตัวเดียวกัน |
 | FE build ครั้งเดียว | FE อ่าน `config.json` ตอนเปิดแอป hub ใส่ `config/<stage>.json` ตอน deploy จึงใช้ web build ตัวเดียวกันได้ทั้ง staging และ prod |

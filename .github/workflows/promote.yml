@@ -64,4 +64,4 @@ jobs:
           git push -f origin "$BRANCH"
           gh pr create -R TanatornMokkhao/ff-poc-hub --base main --head "$BRANCH" \
             --title "prod: $APP $VERSION" \
-            --body "Points production at **$APP $VERSION** ([release](https://github.com/${{ github.repository }}/releases/tag/v$VERSION)). It is the build that passed staging as an rc of $VERSION. Merging deploys it; the production environment then asks for approval."
+            --body "Points production at **$APP $VERSION** ([release](https://github.com/${{ github.repository }}/releases/tag/prod/v$VERSION)). It is the build that passed staging as staging/v$VERSION. Merging deploys it; the production environment then asks for approval."
