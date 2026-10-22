@@ -1,4 +1,4 @@
 # What production runs. Changes only through a reviewed PR.
-be: none
-fe: none
-mobile: none   # reference only; the app ships through the stores
+be: 1.0.1   # 8331f57
+fe: 1.0.1   # f60cc62
+mobile: 1.0.1   # reference only; the app ships through the stores
