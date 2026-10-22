@@ -122,7 +122,7 @@ Mobile ใช้กฎ tag เดียวกัน แต่ deploy ผ่า�
 | ชื่อ tag | `staging/vX.Y.Z-rc.N` (รอบทดสอบ) และ `prod/vX.Y.Z` เลขเดียวกันทุก app ในรอบนั้น (ต่างจากเอกสารที่ให้แต่ละ app มีเลขของตัวเอง) prod ต้องอยู่บน hub commit เดียวกับ rc ที่ผ่าน |
 | build ครั้งเดียว | app build ตอน rc แรกของ commit นั้น rc ถัดไปที่ commit ไม่เปลี่ยน และ prod ใช้ build เดิม (BE retag image, FE ใช้ zip และไฟล์แอปจาก release ของ rc) |
 | ชื่อ repo กลาง | `ff-poc-hub` (เอกสารเรียก `deploy`) app repo คือ `ff-poc-be` และ `ff-poc-fe` (เว็บ + แอป Capacitor อยู่ repo เดียวกัน) |
-| อัปเดต pin | workflow **Bump submodule pins** เปิด PR ย้าย pin ไปที่ `main` ล่าสุดของแต่ละ app (แบบ auto-bump ของ expt-hub) |
+| อัปเดต pin | อัตโนมัติ: CI ผ่านบน `main` ของ app → **Notify hub** ส่ง `repository_dispatch` → hub commit pin ใหม่เข้า `main` ทันที (แบบ push-based ที่ expt-hub เขียนไว้เป็นทางเลือก) ตอน release rc ถ้า pin ยังตามหลัง `main` จะหยุดและบอก commit ที่ขาด ใส่ `[skip-bump-check]` ใน release notes เพื่อข้ามได้ |
 | FE build ครั้งเดียว | FE อ่าน `config.json` ตอนเปิดแอป hub ใส่ `config/<stage>.json` ตอน deploy จึงใช้ web build ตัวเดียวกันได้ทั้ง staging และ prod |
 | BE deploy | จำลอง: pull image จาก GHCR แล้วรันบน runner ตรวจ `/health` และ `/version` |
 | FE deploy | GitHub Pages ของ hub: `/staging/` และ `/prod/` |

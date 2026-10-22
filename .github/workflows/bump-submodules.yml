@@ -1,11 +1,12 @@
 name: Bump submodule pins
 
-# Like expt-hub: opens (or updates) one PR that moves every submodule pin to its repo's
-# main HEAD. Merge it before tagging staging/vX.Y.Z so the release has the latest code.
+# Keeps the pins at commits whose CI passed on main, and commits the change straight to main.
+#   repository_dispatch "bump" {app, sha}: sent by an app repo's Notify hub workflow.
+#   workflow_dispatch: moves every pin to its repo's main HEAD (catch-up by hand).
 on:
+  repository_dispatch:
+    types: [bump]
   workflow_dispatch:
-  # schedule:
-  #   - cron: '0 */2 * * *'
 
 permissions:
   contents: read
@@ -19,33 +20,46 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
-      BRANCH: chore/bump-submodules
+      ONE_APP: ${{ github.event.client_payload.app }}
+      ONE_SHA: ${{ github.event.client_payload.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
           fetch-depth: 0
           token: ${{ secrets.DEPLOY_REPO_TOKEN }}
-      - name: Move pins to main HEAD
+
+      - name: Move the pins
         run: |
           set -euo pipefail
           git config user.name "ff-poc bump bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          lines=""
-          for app in $(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}'); do
+          APPS=$(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}')
+          if [ -n "$ONE_APP" ]; then
+            grep -qx "$ONE_APP" <<<"$APPS" || { echo "::error::Unknown app '$ONE_APP'."; exit 1; }
+            [[ "$ONE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Bad sha '$ONE_SHA'."; exit 1; }
+            APPS="$ONE_APP"
+          fi
+          msg=""
+          for app in $APPS; do
             old=$(git -C "$app" rev-parse HEAD)
             git -C "$app" fetch -q origin main
-            new=$(git -C "$app" rev-parse origin/main)
-            [ "$old" = "$new" ] && continue
+            new="${ONE_SHA:-$(git -C "$app" rev-parse origin/main)}"
+            git -C "$app" cat-file -e "$new^{commit}" || { echo "::error::$app has no commit $new."; exit 1; }
+            if [ "$old" = "$new" ] || git -C "$app" merge-base --is-ancestor "$new" "$old"; then
+              echo "$app: pin ${old::7} is already at or past ${new::7}"
+              continue
+            fi
             git -C "$app" checkout -q "$new"
             git add "$app"
-            lines="$lines- \`$app\` ${old::7} → ${new::7}: $(git -C "$app" log --format='%s' "$old..$new" | head -5 | paste -sd ';' -)"$'\n'
+            msg="$msg $app ${old::7}→${new::7}"
+            echo "$app: ${old::7} → ${new::7}"
+            git -C "$app" log --format='  %h %s' "$old..$new"
           done
-          if git diff --cached --quiet; then echo "All pins are current."; exit 0; fi
-          git switch -c "$BRANCH"
-          git commit -qm "chore: bump submodule pins to main"
-          git push -qf origin "$BRANCH"
-          printf 'Moves the submodule pins to each repo'"'"'s main HEAD.\n\n%s' "$lines" > body.md
-          URL=$(gh pr list --head "$BRANCH" --json url --jq '.[0].url // empty')
-          if [ -n "$URL" ]; then gh pr edit "$URL" --body-file body.md; else URL=$(gh pr create --base main --head "$BRANCH" --title "chore: bump submodule pins" --body-file body.md); fi
-          echo "PR: $URL" >> "$GITHUB_STEP_SUMMARY"
+          git diff --cached --quiet && { echo "Nothing to bump."; exit 0; }
+          git commit -qm "chore: bump pins:$msg"
+          for i in 1 2 3; do
+            git push -q origin HEAD:main && break
+            git pull -q --rebase origin main
+          done
+          echo "### Bumped:$msg" >> "$GITHUB_STEP_SUMMARY"

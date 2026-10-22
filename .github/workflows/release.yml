@@ -58,6 +58,31 @@ jobs:
           fi
           echo "prod/v$V uses the pins tested as $RC"
 
+      # Pins follow main automatically (Bump submodule pins), but a merge may still be in CI.
+      # Stop rather than release yesterday's code; "[skip-bump-check]" in the release notes overrides.
+      - name: Pins must be at each app's main HEAD (staging)
+        if: ${{ steps.t.outputs.stage == 'staging' }}
+        run: |
+          set -euo pipefail
+          BODY=""
+          for _ in 1 2 3; do BODY=$(gh release view "$TAG" --json body --jq .body 2>/dev/null) && break; sleep 5; done
+          if grep -qF '[skip-bump-check]' <<<"$BODY"; then echo "Pin check skipped by the release notes."; exit 0; fi
+          behind=""
+          for app in $(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}'); do
+            pin=$(git -C "$app" rev-parse HEAD)
+            n=$(gh api "repos/$OWNER/ff-poc-$app/compare/$pin...main" --jq .ahead_by)
+            if [ "$n" != 0 ]; then
+              subjects=$(gh api "repos/$OWNER/ff-poc-$app/compare/$pin...main" --jq '[.commits[].commit.message | split("\n")[0]] | join("; ")')
+              behind="$behind\n- $app is $n commit(s) behind main: $subjects"
+            fi
+          done
+          if [ -n "$behind" ]; then
+            printf '::error::Pins are behind main. Wait a minute for Bump submodule pins (CI may still be running), or run it by hand, then create a new rc. To release the older code on purpose, put [skip-bump-check] in the release notes.%b\n' "$behind"
+            printf '### Stopped: pins behind main%b\n' "$behind" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          echo "Pins match main."
+
       - name: Tag the pinned commit in each sub-repo
         run: |
           set -euo pipefail
