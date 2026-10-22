@@ -15,6 +15,14 @@ on:
         description: Why (goes into the commit message)
         type: string
         required: true
+      be:
+        description: Roll back be
+        type: boolean
+        default: true
+      fe:
+        description: Roll back fe (web)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -31,6 +39,7 @@ jobs:
       OWNER: ${{ github.repository_owner }}
       WANT: ${{ inputs.version }}
       REASON: ${{ inputs.reason }}
+      APPS: ${{ inputs.be && 'be' || '' }} ${{ inputs.fe && 'fe' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,9 +50,11 @@ jobs:
         run: |
           set -euo pipefail
           [ -n "$GH_TOKEN" ] || { echo "::error::Set the DEPLOY_REPO_TOKEN secret in this repo."; exit 1; }
+          [ -n "${APPS// /}" ] || { echo "::error::Tick be, fe or both."; exit 1; }
           get() { sed -n "s/^$1:[[:space:]]*\([^[:space:]#]*\).*/\1/p" prod/versions.yaml; }
-          CUR=$(get fe); [ "$CUR" != none ] || CUR=$(get be)
-          [ "$CUR" != none ] || { echo "::error::Production runs nothing yet."; exit 1; }
+          FIRST=$(awk '{print $1}' <<<"$APPS")
+          CUR=$(get "$FIRST")
+          [ "$CUR" != none ] || { echo "::error::Production runs no $FIRST yet."; exit 1; }
           if [ -n "$WANT" ]; then
             V="${WANT#v}"
             [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$WANT' is not X.Y.Z."; exit 1; }
@@ -60,27 +71,32 @@ jobs:
       - name: The builds of that release must still exist
         run: |
           set -euo pipefail
-          docker buildx imagetools inspect "ghcr.io/${OWNER,,}/ff-poc-be:$V" >/dev/null \
-            || { echo "::error::Image ff-poc-be:$V is gone; rollback would fail."; exit 1; }
-          gh release view "prod/v$V" -R "$OWNER/ff-poc-fe" --json assets --jq '.assets[].name' | grep -qx web-build.zip \
-            || { echo "::error::Release prod/v$V in ff-poc-fe has no web-build.zip; rollback would fail."; exit 1; }
-          echo "be image and fe web build for $V are there"
+          for app in $APPS; do
+            case "$app" in
+              be) docker buildx imagetools inspect "ghcr.io/${OWNER,,}/ff-poc-be:$V" >/dev/null \
+                    || { echo "::error::Image ff-poc-be:$V is gone; rollback would fail."; exit 1; } ;;
+              fe) gh release view "prod/v$V" -R "$OWNER/ff-poc-fe" --json assets --jq '.assets[].name' | grep -qx web-build.zip \
+                    || { echo "::error::Release prod/v$V in ff-poc-fe has no web-build.zip; rollback would fail."; exit 1; } ;;
+            esac
+            echo "$app build for $V is there"
+          done
 
       - name: Point production at it (this starts Deploy)
         run: |
           set -euo pipefail
           git config user.name "ff-poc release bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          for app in be fe; do
+          for app in $APPS; do
             sha=$(git ls-tree "prod/v$V" "$app" | awk '{print $3}')
             sed -i -E "s/^($app:[[:space:]]*)[^[:space:]#]+.*/\1$V   # ${sha::7}/" prod/versions.yaml
           done
           cat prod/versions.yaml
-          git commit -qam "prod: rollback $CUR -> $V ($REASON)"
+          git commit -qam "prod: rollback$(printf ' %s' $APPS) $CUR -> $V ($REASON)"
           git push -q origin HEAD:main
           {
-            echo "### Production rollback: $CUR → $V"
+            echo "### Production rollback ($APPS): $CUR → $V"
             echo "Reason: $REASON"
+            [ "$(wc -w <<<"$APPS")" = 1 ] && echo "Only $APPS rolled back: be and fe now run different versions; make sure they work together."
             echo
             echo "Approve the **production** deployment in the Deploy run to finish."
             echo
