@@ -45,6 +45,7 @@ jobs:
     uses: ./.github/workflows/deploy-stage.yml
     with:
       stage: staging
+    secrets: inherit
 
   prod:
     needs: changes
@@ -52,3 +53,4 @@ jobs:
     uses: ./.github/workflows/deploy-stage.yml
     with:
       stage: prod
+    secrets: inherit
