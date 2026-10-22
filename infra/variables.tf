@@ -13,6 +13,11 @@ variable "hub_repo" {
   default = "ff-poc-hub"
 }
 
+variable "be_repo" {
+  type    = string
+  default = "ff-poc-be"
+}
+
 # Stage name in this repo => GitHub Environment the deploy job runs in.
 variable "stages" {
   type = map(string)
