@@ -42,21 +42,22 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.DEPLOY_REPO_TOKEN }}
 
+      # Compares the app pins, not the hub commit: the hub commits staging/versions.yaml after each
+      # rc, so main is one commit ahead of the rc even when it ships exactly the same apps.
       - name: prod must use the pins that passed staging
         if: ${{ steps.t.outputs.stage == 'prod' }}
         run: |
           V="${{ steps.t.outputs.version }}"
-          RC=$(git tag --points-at "$GITHUB_SHA" | grep -E "^staging/v$V-rc\.[0-9]+$" | sort -V | tail -1 || true)
-          if [ -z "$RC" ]; then
-            LAST=$(git tag --list "staging/v$V-rc.*" --sort=-v:refname | head -1)
-            if [ -n "$LAST" ]; then
-              echo "::error::prod/v$V is on ${GITHUB_SHA::7}, but the last rc $LAST is on $(git rev-list -n1 "$LAST" | cut -c1-7). Tag prod on that commit."
-            else
-              echo "::error::No staging/v$V-rc.N in the hub: $V never went to staging."
-            fi
+          RC=$(git tag --list "staging/v$V-rc.*" --sort=-v:refname | head -1)
+          [ -n "$RC" ] || { echo "::error::No staging/v$V-rc.N in the hub: $V never went to staging."; exit 1; }
+          pins() { git ls-tree "$1" be fe | awk '{print $4, $3}'; }
+          if [ "$(pins "$GITHUB_SHA")" != "$(pins "$RC")" ]; then
+            echo "::error::prod/v$V ships different apps from $RC, the last rc of $V:"
+            diff <(pins "$RC" | sed "s/^/$RC: /") <(pins "$GITHUB_SHA" | sed 's/^/prod: /') | grep '^[<>]' || true
+            echo "::error::Release a new rc of $V with these pins first, or tag prod on $RC."
             exit 1
           fi
-          echo "prod/v$V uses the pins tested as $RC"
+          echo "prod/v$V ships the same be and fe as $RC: $(pins "$RC" | awk '{printf "%s %s ", $1, substr($2,1,7)}')"
 
       # Pins follow main automatically (Bump submodule pins), but a merge may still be in CI.
       # Stop rather than release yesterday's code; "[skip-bump-check]" in the release notes overrides.
