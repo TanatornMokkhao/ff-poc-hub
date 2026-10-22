@@ -1,0 +1,92 @@
+name: Start hotfix
+
+# For when main holds work that cannot ship yet but prod needs a fix now.
+# Before running: in the app repo, branch from the commit prod runs (e.g. release/1.0.x from
+# prod/v1.0.1), commit the fix and push that branch. Then run this with the app and the fix commit.
+# It makes hub branch hotfix/<next patch> from the prod release with only that app's pin moved,
+# and releases staging/v<next>-rc.N from it. Then test staging, use Promote to prod, and bring the
+# fix into the app's main too (cherry-pick), or it comes back in the next release.
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: App with the fix
+        type: choice
+        options: [be, fe]
+      commit:
+        description: The fix commit in that app's repo (full or short sha)
+        type: string
+        required: true
+      from:
+        description: Prod version to fix (empty = what prod runs now)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      APP: ${{ inputs.app }}
+      COMMIT: ${{ inputs.commit }}
+      FROM_INPUT: ${{ inputs.from }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.DEPLOY_REPO_TOKEN }}
+
+      - name: Work out the versions
+        run: |
+          set -euo pipefail
+          FROM="${FROM_INPUT:-$(sed -n 's/^be:[[:space:]]*\([^[:space:]#]*\).*/\1/p' prod/versions.yaml)}"
+          [[ "$FROM" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || { echo "::error::'$FROM' is not a prod version X.Y.Z."; exit 1; }
+          git rev-parse -q --verify "refs/tags/prod/v$FROM" >/dev/null || { echo "::error::There is no prod/v$FROM."; exit 1; }
+          NEXT="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+          if git rev-parse -q --verify "refs/tags/prod/v$NEXT" >/dev/null; then
+            echo "::error::prod/v$NEXT already exists; give 'from' as the newest prod version."; exit 1
+          fi
+          N=$(( $(git tag --list "staging/v$NEXT-rc.*" | wc -l) + 1 ))
+          FIX=$(gh api "repos/$OWNER/ff-poc-$APP/commits/$COMMIT" --jq .sha) || { echo "::error::No commit $COMMIT in ff-poc-$APP."; exit 1; }
+          PROD_PIN=$(git ls-tree "prod/v$FROM" "$APP" | awk '{print $3}')
+          case "$(gh api "repos/$OWNER/ff-poc-$APP/compare/$PROD_PIN...$FIX" --jq .status)" in
+            ahead) ;;
+            identical) echo "::error::$COMMIT is what prod/v$FROM already ships."; exit 1 ;;
+            *) echo "::warning::$COMMIT does not build on prod/v$FROM's $APP (${PROD_PIN::7}); it may carry other changes." ;;
+          esac
+          { echo "FROM=$FROM"; echo "NEXT=$NEXT"; echo "RC=staging/v$NEXT-rc.$N"; echo "FIX=$FIX"; } >> "$GITHUB_ENV"
+          echo "Hotfix $FROM -> $NEXT: $APP ${PROD_PIN::7} -> ${FIX::7}, release staging/v$NEXT-rc.$N"
+
+      - name: Branch hotfix/${{ env.NEXT }} with the new pin
+        run: |
+          set -euo pipefail
+          B="hotfix/$NEXT"
+          if git ls-remote --exit-code --heads origin "$B" >/dev/null; then git switch -q -c "$B" "origin/$B"
+          else git switch -q -c "$B" "prod/v$FROM"; fi
+          git update-index --cacheinfo "160000,$FIX,$APP"
+          git config user.name "ff-poc release bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qm "hotfix $NEXT: $APP -> ${FIX::7}"
+          git push -q origin "$B"
+          echo "B=$B" >> "$GITHUB_ENV"
+
+      - name: Release ${{ env.RC }}
+        run: |
+          set -euo pipefail
+          gh release create "$RC" -R "$GITHUB_REPOSITORY" --target "$B" --title "$RC" --prerelease \
+            --notes "[skip-bump-check] Hotfix of prod/v$FROM: $APP ${FIX::7}, from branch $B."
+          {
+            echo "### $RC released from $B"
+            echo "1. Test staging when the Release and Deploy runs finish."
+            echo "2. **Promote to prod** (leave rc empty) creates prod/v$NEXT from this rc."
+            echo "3. Bring ${FIX::7} into ff-poc-$APP main (cherry-pick PR), or the bug returns in the next release."
+            echo "4. Staging now runs the hotfix: release a new rc from main to test main again."
+          } >> "$GITHUB_STEP_SUMMARY"
