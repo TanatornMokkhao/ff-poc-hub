@@ -1,16 +1,21 @@
 name: Rollback production
 
 # Puts production back on an earlier prod release, using the builds that release already has
-# (no new tag, no rebuild). Leave the version empty to go to the release before the current one.
+# (no new tag, no rebuild). "previous" goes to the release before the current one.
 # The Deploy workflow then asks for the production approval as usual.
 # The mobile app cannot be rolled back in the stores; its line in prod/versions.yaml is left as is.
+# The version list is rewritten by Sync rollback versions after each prod release; do not edit it by hand.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: X.Y.Z to go back to (empty = the prod release before the current one)
-        type: string
-        default: ''
+        description: Version to go back to
+        type: choice
+        default: previous
+        options:
+          - previous
+          # rollback-versions:start
+          # rollback-versions:end
       reason:
         description: Why (goes into the commit message)
         type: string
@@ -55,6 +60,7 @@ jobs:
           FIRST=$(awk '{print $1}' <<<"$APPS")
           CUR=$(get "$FIRST")
           [ "$CUR" != none ] || { echo "::error::Production runs no $FIRST yet."; exit 1; }
+          [ "$WANT" = previous ] && WANT=""
           if [ -n "$WANT" ]; then
             V="${WANT#v}"
             [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$WANT' is not X.Y.Z."; exit 1; }
