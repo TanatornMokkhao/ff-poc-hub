@@ -35,15 +35,9 @@ data "aws_iam_policy_document" "deploy_trust" {
   }
 }
 
-# Writes the non-secret settings from config/be/<stage>.env and lists parameter names.
-# It can never read a secret: decrypting is denied outright.
+# Lists parameter names, so the deploy can check every key the release needs is set.
+# It can never read a value: reading and decrypting are denied outright.
 data "aws_iam_policy_document" "deploy" {
-  for_each = var.stages
-
-  statement {
-    actions   = ["ssm:PutParameter", "ssm:AddTagsToResource"]
-    resources = ["${local.param_arn}/${each.key}/be/*"]
-  }
   statement {
     actions   = ["ssm:DescribeParameters"]
     resources = ["*"]
@@ -64,7 +58,7 @@ resource "aws_iam_role" "deploy" {
 resource "aws_iam_role_policy" "deploy" {
   for_each = var.stages
   role     = aws_iam_role.deploy[each.key].id
-  policy   = data.aws_iam_policy_document.deploy[each.key].json
+  policy   = data.aws_iam_policy_document.deploy.json
 }
 
 # Runtime role, one per stage: what the BE server runs as (an ECS task role here).
