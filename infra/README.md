@@ -7,7 +7,7 @@ the **Terraform** workflow only checks it (`fmt`, `validate`).
 | --- | --- | --- |
 | `.env.example` in `ff-poc-be` / `ff-poc-fe` | the **names** of every key the app reads; `# secret` marks a secret | a PR in that app, with the code |
 | Parameter Store `/ff-poc/<stage>/be/<KEY>` | every BE **value**: `String` if public, `SecureString` if secret | an admin, by hand |
-| `config/fe/<stage>.json` (git) | all FE values (the browser sees them, so none is secret) | a PR |
+| variables of the `staging` / `production` environments in `ff-poc-fe` | all FE values (the browser and the apps expose them, so none is secret) | Settings in ff-poc-fe |
 
 Until this is applied, the hub's GitHub environments stand in for Parameter Store: `BE_<KEY>`
 variables for public values and `BE_<KEY>` secrets for secrets (fake values).
@@ -43,6 +43,6 @@ aws ssm put-parameter --type SecureString --name /ff-poc/prod/be/DB_PASSWORD --v
 ```
 
 Adding a key: add it to the app's `.env.example` in the same PR as the code (with `# secret` if it
-is one), then give it a value in each stage (Parameter Store for the BE, `config/fe/<stage>.json`
-for the FE). The deploy of a release whose `.env.example` has the key stops and names it until
+is one), then give it a value in each stage (Parameter Store for the BE, the ff-poc-fe
+environment variables for the FE). The deploy of a release whose `.env.example` has the key stops and names it until
 the stage it deploys to has a value.

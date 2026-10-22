@@ -81,8 +81,8 @@ jobs:
             case "$app" in
               be) docker buildx imagetools inspect "ghcr.io/${OWNER,,}/ff-poc-be:$V" >/dev/null \
                     || { echo "::error::Image ff-poc-be:$V is gone; rollback would fail."; exit 1; } ;;
-              fe) gh release view "prod/v$V" -R "$OWNER/ff-poc-fe" --json assets --jq '.assets[].name' | grep -qx web-build.zip \
-                    || { echo "::error::Release prod/v$V in ff-poc-fe has no web-build.zip; rollback would fail."; exit 1; } ;;
+              fe) gh release view "prod/v$V" -R "$OWNER/ff-poc-fe" --json assets --jq '.assets[].name' | grep -qxE 'web-build(-prod)?\.zip' \
+                    || { echo "::error::Release prod/v$V in ff-poc-fe has no web build; rollback would fail."; exit 1; } ;;
             esac
             echo "$app build for $V is there"
           done
