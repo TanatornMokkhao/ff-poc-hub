@@ -1,0 +1,7 @@
+{
+  "env": "staging",
+  "apiBaseUrl": "https://api.staging.example.com",
+  "flags": {
+    "welcomeBanner": true
+  }
+}

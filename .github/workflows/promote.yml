@@ -1,0 +1,63 @@
+name: Promote
+
+# Called by the app repos' release workflows.
+# staging: commits the new version straight to staging/versions.yaml.
+# prod:    opens a PR changing prod/versions.yaml; a person reviews and merges it.
+on:
+  workflow_call:
+    inputs:
+      app:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      stage:
+        type: string
+        required: true
+    secrets:
+      DEPLOY_REPO_TOKEN:
+        required: true
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+      APP: ${{ inputs.app }}
+      VERSION: ${{ inputs.version }}
+      STAGE: ${{ inputs.stage }}
+    steps:
+      - name: Token present
+        run: '[ -n "$GH_TOKEN" ] || { echo "Set the DEPLOY_REPO_TOKEN secret in ${{ github.repository }}."; exit 1; }'
+
+      - uses: actions/checkout@v4
+        with:
+          repository: TanatornMokkhao/ff-poc-hub
+          token: ${{ secrets.DEPLOY_REPO_TOKEN }}
+
+      - name: Update versions.yaml
+        run: |
+          FILE="$STAGE/versions.yaml"
+          grep -q "^$APP:" "$FILE" || { echo "$APP is not listed in $FILE"; exit 1; }
+          sed -i -E "s/^($APP:[[:space:]]*)[^[:space:]#]+/\1$VERSION/" "$FILE"
+          git diff
+          git config user.name "ff-poc release bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit to staging
+        if: ${{ inputs.stage == 'staging' }}
+        run: |
+          git commit -qam "staging: $APP $VERSION"
+          git push origin HEAD:main
+
+      - name: Open the production PR
+        if: ${{ inputs.stage == 'prod' }}
+        run: |
+          BRANCH="promote/$APP-$VERSION"
+          git switch -c "$BRANCH"
+          git commit -qam "prod: $APP $VERSION"
+          git push -f origin "$BRANCH"
+          gh pr create -R TanatornMokkhao/ff-poc-hub --base main --head "$BRANCH" \
+            --title "prod: $APP $VERSION" \
+            --body "Points production at **$APP $VERSION** ([release](https://github.com/TanatornMokkhao/ff-poc-$APP/releases/tag/v$VERSION)). It is the build that passed staging as an rc of $VERSION. Merging deploys it; the production environment then asks for approval."

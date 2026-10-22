@@ -1,0 +1,4 @@
+# What staging runs. App repos commit here directly when they tag an rc.
+be: none
+fe: none
+mobile: none   # reference only; the app ships through the stores

@@ -1,0 +1,4 @@
+# What production runs. Changes only through a reviewed PR.
+be: none
+fe: none
+mobile: none   # reference only; the app ships through the stores
