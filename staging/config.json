@@ -18,7 +18,7 @@
     "FEATURE_WELCOME_BANNER": "true"
   },
   "versions": {
-    "be": "1.0.0-rc.3",
-    "fe": "1.0.0-rc.3"
+    "be": "1.0.1-rc.2",
+    "fe": "1.0.1-rc.2"
   }
 }
