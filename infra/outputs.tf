@@ -6,7 +6,3 @@ output "deploy_role_arns" {
 output "runtime_role_arns" {
   value = { for k, r in aws_iam_role.runtime : k => r.arn }
 }
-
-output "secret_names" {
-  value = local.secret_list
-}

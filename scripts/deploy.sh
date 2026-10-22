@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Deploys what <stage>/versions.yaml names, BE first, then FE.
 #   scripts/deploy.sh staging|prod <pages-dir>
-# Settings come from git, secrets from Parameter Store (see infra/README.md):
-#   config/be/<stage>.env    BE settings that are not secret
-#   config/be/secrets.list   names of BE secrets; values at /ff-poc/<stage>/be/<NAME>
-#   config/fe/<stage>.json   FE config.json (public: the browser reads it)
-# AWS is simulated here: AWS_ROLE_ARN is a mock, so the secrets get placeholder values. On a real
-# account the deploy role writes the .env values to Parameter Store and the server reads its path.
+# Which keys each app needs: its .env.example at the tag being deployed ("# secret" marks a secret).
+# Where the values are:
+#   config/be/<stage>.env    BE values that are not secret (git, reviewed in PRs)
+#   secret store             BE secrets. Real: Parameter Store /ff-poc/<stage>/be/<KEY>.
+#                            Here (no AWS): GitHub environment secrets named BE_<KEY>, in SECRETS_JSON.
+#   config/fe/<stage>.json   FE values under "runtime" (public: the browser reads them)
+# Everything is checked before anything is deployed; a missing key stops the deploy and names it.
 set -euo pipefail
 
 STAGE="$1"
@@ -14,27 +15,69 @@ PAGES="$2"
 FILE="$STAGE/versions.yaml"
 OWNER="tanatornmokkhao"
 BE_CONF="config/be/$STAGE.env"
-SECRETS="config/be/secrets.list"
 FE_CONF="config/fe/$STAGE.json"
+SJ="${SECRETS_JSON:-}"
+[ -n "$SJ" ] || SJ='{}'
 
 get() { sed -n "s/^$1:[[:space:]]*\([^[:space:]#]*\).*/\1/p" "$FILE"; }
-lines() { grep -Ev '^[[:space:]]*(#|$)' "$1" || true; }
-names() { lines "$1" | sed 's/=.*//'; }
+lines() { grep -Ev '^[[:space:]]*(#|$)' || true; }
+keys() { lines | sed 's/=.*//' | sort -u; }
+secret_keys() { grep -E '#[[:space:]]*secret[[:space:]]*$' | keys; }
+public_keys() { lines | grep -Ev '#[[:space:]]*secret[[:space:]]*$' | keys; }
+# .env.example of an app at the release being deployed; empty when that release has none.
+example() { gh api "repos/$OWNER/ff-poc-$1/contents/.env.example?ref=$STAGE/v$2" -H "Accept: application/vnd.github.raw" 2>/dev/null || true; }
+
 BE=$(get be)
 FE=$(get fe)
 echo "Deploying $STAGE: be=$BE fe=$FE"
+PROBLEMS=()
 
 if [ "$BE" != none ]; then
-  LEAK=$(comm -12 <(names "$BE_CONF" | sort) <(names "$SECRETS" | sort))
-  [ -z "$LEAK" ] || { echo "$BE_CONF holds secrets ($LEAK): remove them and set them in Parameter Store."; exit 1; }
-
-  echo "AWS role (simulated): ${AWS_ROLE_ARN:-not set}"
-  echo "Would write to /ff-poc/$STAGE/be/ as String: $(names "$BE_CONF" | paste -sd, -)"
-  echo "Would check these SecureString names exist: $(names "$SECRETS" | paste -sd, -)"
-
+  BE_EXAMPLE=$(example be "$BE")
   ENVFILE=$(mktemp)
-  lines "$BE_CONF" > "$ENVFILE"
-  for k in $(names "$SECRETS"); do echo "$k=simulated-from-parameter-store" >> "$ENVFILE"; done
+  lines < "$BE_CONF" > "$ENVFILE"
+  if [ -z "$BE_EXAMPLE" ]; then
+    echo "be $BE has no .env.example: its settings are not checked."
+  else
+    for k in $(comm -12 <(keys < "$BE_CONF") <(secret_keys <<<"$BE_EXAMPLE")); do
+      PROBLEMS+=("be: $k is a secret but is in $BE_CONF; move it to the secret store")
+    done
+    for k in $(comm -23 <(public_keys <<<"$BE_EXAMPLE") <(keys < "$BE_CONF")); do
+      PROBLEMS+=("be: $k has no value in $BE_CONF")
+    done
+    for k in $(secret_keys <<<"$BE_EXAMPLE"); do
+      v=$(jq -r --arg k "BE_$k" '.[$k] // empty' <<<"$SJ")
+      if [ -z "$v" ]; then PROBLEMS+=("be: secret $k has no value in the $STAGE secret store (BE_$k)")
+      else printf '%s=%s\n' "$k" "$v" >> "$ENVFILE"; fi
+    done
+    EXTRA=$(comm -13 <(keys <<<"$BE_EXAMPLE") <(keys < "$BE_CONF") | paste -sd, -)
+    [ -z "$EXTRA" ] || echo "::warning::$BE_CONF has keys be $BE does not read: $EXTRA"
+    echo "be $BE needs public: $(public_keys <<<"$BE_EXAMPLE" | paste -sd, -)"
+    echo "be $BE needs secret: $(secret_keys <<<"$BE_EXAMPLE" | paste -sd, -) (real: /ff-poc/$STAGE/be/<KEY>, role ${AWS_ROLE_ARN:-not set})"
+  fi
+fi
+
+if [ "$FE" != none ]; then
+  FE_EXAMPLE=$(example fe "$FE")
+  if [ -z "$FE_EXAMPLE" ]; then
+    echo "fe $FE has no .env.example: its settings are not checked."
+  else
+    HAVE=$(jq -r '.runtime // {} | to_entries[] | select(.value != "") | .key' "$FE_CONF" | sort -u)
+    for k in $(comm -23 <(keys <<<"$FE_EXAMPLE") <(echo "$HAVE")); do
+      PROBLEMS+=("fe: $k has no value in $FE_CONF")
+    done
+    echo "fe $FE needs: $(keys <<<"$FE_EXAMPLE" | paste -sd, -)"
+  fi
+fi
+
+if [ ${#PROBLEMS[@]} -gt 0 ]; then
+  printf '::error::%s\n' "${PROBLEMS[@]}"
+  rm -f "${ENVFILE:-}"
+  echo "Nothing was deployed."
+  exit 1
+fi
+
+if [ "$BE" != none ]; then
   WANT_ENV=$(sed -n 's/^APP_ENV=//p' "$ENVFILE")
   IMAGE="ghcr.io/$OWNER/ff-poc-be:$BE"
   docker pull "$IMAGE"

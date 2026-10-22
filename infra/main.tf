@@ -1,9 +1,8 @@
 data "aws_caller_identity" "me" {}
 
 locals {
-  account     = data.aws_caller_identity.me.account_id
-  param_arn   = "arn:aws:ssm:${var.region}:${local.account}:parameter/ff-poc"
-  secret_list = [for l in split("\n", file("${path.module}/../config/be/secrets.list")) : trimspace(l) if trimspace(l) != "" && !startswith(trimspace(l), "#")]
+  account   = data.aws_caller_identity.me.account_id
+  param_arn = "arn:aws:ssm:${var.region}:${local.account}:parameter/ff-poc"
 }
 
 # GitHub Actions gets short-lived AWS credentials from this provider; no AWS keys are stored in GitHub.
@@ -112,4 +111,4 @@ resource "aws_iam_role_policy" "runtime" {
 
 # The secret parameters themselves are not created here on purpose: Terraform would copy every
 # value into its state file. An admin creates each one once (see README), and the deploy fails
-# while any name in config/be/secrets.list is missing.
+# while any key marked "# secret" in the BE's .env.example has no value.
