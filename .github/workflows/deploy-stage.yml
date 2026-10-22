@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 # One queue per stage, so a prod deploy waiting for approval never holds up staging.
 concurrency:
@@ -32,13 +33,29 @@ jobs:
           if git show-ref -q refs/heads/gh-pages; then git worktree add pages gh-pages
           else git worktree add --orphan -b gh-pages pages; fi
 
-      # The FE web build already holds its config.json. This environment's BE_<KEY> variables and
-      # secrets stand in for Parameter Store until there is a real AWS account.
+      # Two roles through GitHub OIDC, no AWS keys stored. The runtime role is what the server runs
+      # as (its credentials go to the container); the deploy role, assumed last, is what this job
+      # runs as. Both accept only a job in this stage's environment.
+      - name: Credentials for the server (runtime role)
+        id: runtime
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_RUNTIME_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          output-credentials: true
+      - name: Credentials for this job (deploy role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+
       - run: bash scripts/deploy.sh "${{ inputs.stage }}" pages
         env:
-          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
-          VARS_JSON: ${{ toJSON(vars) }}
-          SECRETS_JSON: ${{ toJSON(secrets) }}
+          ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+          RUNTIME_ACCESS_KEY_ID: ${{ steps.runtime.outputs.aws-access-key-id }}
+          RUNTIME_SECRET_ACCESS_KEY: ${{ steps.runtime.outputs.aws-secret-access-key }}
+          RUNTIME_SESSION_TOKEN: ${{ steps.runtime.outputs.aws-session-token }}
 
       - name: Publish
         working-directory: pages
