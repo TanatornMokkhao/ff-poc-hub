@@ -4,20 +4,20 @@
   "flags": {
     "welcomeBanner": true
   },
-  "versions": {
-    "be": "1.0.0-rc.2",
-    "fe": "1.0.0-rc.2"
-  },
   "runtime": {
     "API_BASE_URL": "https://api.staging.example.com",
     "WS_BASE_URL": "wss://ws.staging.example.com",
-    "API_VERSION": "v1.2",
-    "STRIPE_PUBLISH_KEY": "pk_test_fake_stg",
-    "RECAPTCHA_SITE_KEY": "fake-recaptcha-stg",
-    "GOOGLE_PLACES_API_KEY": "fake-places-stg",
-    "DD_APP_ID": "fake-dd-app-stg",
-    "DD_CLIENT_TOKEN": "fake-dd-token-stg",
-    "SUPPORT_EMAIL": "help@example.com",
+    "API_VERSION": "v1",
+    "STRIPE_PUBLISH_KEY": "pk_test_fake_staging",
+    "RECAPTCHA_SITE_KEY": "6Lfake-staging-site-key",
+    "GOOGLE_PLACES_API_KEY": "AIzaFake-staging-places",
+    "DD_APP_ID": "fake-staging-dd-app",
+    "DD_CLIENT_TOKEN": "pubfake-staging-dd-token",
+    "SUPPORT_EMAIL": "support+staging@example.com",
     "FEATURE_WELCOME_TOUR": "true"
+  },
+  "versions": {
+    "be": "1.0.0-rc.2",
+    "fe": "1.0.0-rc.2"
   }
 }
