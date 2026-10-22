@@ -1,0 +1,1 @@
+(function(){System.register([],function(e,t){return{setters:[],execute:function(){e(`t`,typeof window<`u`?window:void 0),e(`n`,typeof document<`u`?document:void 0)}}})})();
