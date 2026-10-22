@@ -7,5 +7,9 @@
   "versions": {
     "be": "1.0.0-rc.2",
     "fe": "1.0.0-rc.2"
+  },
+  "runtime": {
+    "API_BASE_URL": "https://api.staging.example.com",
+    "ANALYTICS_KEY": "staging-fake-analytics"
   }
 }
