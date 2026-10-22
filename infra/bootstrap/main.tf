@@ -45,7 +45,8 @@ resource "aws_iam_openid_connect_provider" "github" {
 }
 
 # The most any role made by Terraform can do: read the ff-poc parameters, push and pull the
-# ff-poc images. Nothing else in the account, whatever policy the role is given.
+# ff-poc images, write the ff-poc web buckets and refresh their CDN. Nothing else in the account,
+# whatever policy the role is given.
 data "aws_iam_policy_document" "boundary" {
   statement {
     sid       = "ListParameterNames"
@@ -80,6 +81,21 @@ data "aws_iam_policy_document" "boundary" {
       "ecr:DescribeImages",
     ]
     resources = ["arn:aws:ecr:${var.region}:${local.account}:repository/${local.prefix}-*"]
+  }
+  statement {
+    sid       = "WebBuckets"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${local.prefix}-web-*"]
+  }
+  statement {
+    sid       = "WebObjects"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["arn:aws:s3:::${local.prefix}-web-*/*"]
+  }
+  statement {
+    sid       = "CdnRefresh"
+    actions   = ["cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"]
+    resources = ["arn:aws:cloudfront::${local.account}:distribution/*"]
   }
 }
 
@@ -158,6 +174,17 @@ data "aws_iam_policy_document" "terraform" {
   statement {
     sid       = "EcrLogin"
     actions   = ["ecr:GetAuthorizationToken", "ecr:DescribeRepositories"]
+    resources = ["*"]
+  }
+  statement {
+    sid       = "WebBuckets"
+    actions   = ["s3:*"]
+    resources = ["arn:aws:s3:::${local.prefix}-web-*", "arn:aws:s3:::${local.prefix}-web-*/*"]
+  }
+  # CloudFront has few resource-level permissions; the account has no other distribution.
+  statement {
+    sid       = "Cdn"
+    actions   = ["cloudfront:*"]
     resources = ["*"]
   }
   statement {

@@ -7,7 +7,8 @@
 #     SecureString) before anything deploys. The server reads the values itself at boot, as the
 #     runtime role, whose short-lived credentials come in RUNTIME_*.
 # FE: the fe release carries one web build per stage with its config.json already baked in (fe
-#     checks its own keys at build time); the hub only adds the versions.
+#     checks its own keys at build time); the hub only adds the versions, then copies it to the
+#     stage's S3 bucket (WEB_BUCKET) behind CloudFront. GitHub Pages gets the same copy.
 set -euo pipefail
 
 STAGE="$1"
@@ -131,4 +132,18 @@ if [ "$FE" != none ]; then
   fi
   jq --arg be "$BE" --arg fe "$FE" '. + {versions: {be: $be, fe: $fe}}' "$CONF" > "$CONF.new" && mv "$CONF.new" "$CONF"
   echo "fe $FE ($STAGE build) copied to $PAGES/$STAGE with runtime keys: $(jq -r '.runtime // {} | keys | join(", ")' "$CONF")"
+
+  if [ -n "${WEB_BUCKET:-}" ]; then
+    # Hashed assets can be cached for good; index.html and config.json must be fetched fresh.
+    aws s3 sync "$PAGES/$STAGE/" "s3://$WEB_BUCKET/" --delete --only-show-errors \
+      --exclude index.html --exclude config.json --cache-control "public, max-age=31536000, immutable"
+    for f in index.html config.json; do
+      aws s3 cp "$PAGES/$STAGE/$f" "s3://$WEB_BUCKET/$f" --only-show-errors --cache-control "no-store"
+    done
+    aws cloudfront create-invalidation --distribution-id "$CF_DISTRIBUTION_ID" \
+      --paths /index.html /config.json --query Invalidation.Id --output text >/dev/null
+    echo "fe $FE uploaded to s3://$WEB_BUCKET and CloudFront refreshed: ${WEB_URL:-}"
+  else
+    echo "::warning::WEB_BUCKET is not set for $STAGE: the web went to GitHub Pages only."
+  fi
 fi

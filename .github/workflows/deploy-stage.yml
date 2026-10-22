@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: ${{ inputs.stage == 'prod' && 'production' || 'staging' }}
-      url: https://tanatornmokkhao.github.io/ff-poc-hub/${{ inputs.stage }}/
+      url: ${{ vars.WEB_URL || format('https://tanatornmokkhao.github.io/ff-poc-hub/{0}/', inputs.stage) }}
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -53,6 +53,9 @@ jobs:
       - run: bash scripts/deploy.sh "${{ inputs.stage }}" pages
         env:
           ECR_REPOSITORY_URL: ${{ vars.ECR_REPOSITORY_URL }}
+          WEB_BUCKET: ${{ vars.WEB_BUCKET }}
+          CF_DISTRIBUTION_ID: ${{ vars.CF_DISTRIBUTION_ID }}
+          WEB_URL: ${{ vars.WEB_URL }}
           RUNTIME_ACCESS_KEY_ID: ${{ steps.runtime.outputs.aws-access-key-id }}
           RUNTIME_SECRET_ACCESS_KEY: ${{ steps.runtime.outputs.aws-secret-access-key }}
           RUNTIME_SESSION_TOKEN: ${{ steps.runtime.outputs.aws-session-token }}
