@@ -1,20 +1,18 @@
 #!/usr/bin/env bash
 # Deploys what <stage>/versions.yaml names, BE first, then FE.
 #   scripts/deploy.sh staging|prod <pages-dir>
-# Which keys each app needs: its .env.example at the tag being deployed ("# secret" marks a secret).
-# Where the values are:
-#   BE                       Real: Parameter Store /ff-poc/<stage>/be/<KEY> (String, or SecureString
-#                            for a secret), read by the server. Here (no AWS): this GitHub environment's
-#                            variables BE_<KEY> (VARS_JSON) and secrets BE_<KEY> (SECRETS_JSON).
-#   config/fe/<stage>.json   FE values under "runtime" (git; public: the browser reads them)
-# Everything is checked before anything is deployed; a missing key stops the deploy and names it.
+# BE: which keys it needs is its .env.example at the tag being deployed ("# secret" marks a secret).
+#     Real values: Parameter Store /ff-poc/<stage>/be/<KEY> (String, or SecureString for a secret),
+#     read by the server. Here (no AWS): this GitHub environment's variables BE_<KEY> (VARS_JSON)
+#     and secrets BE_<KEY> (SECRETS_JSON). All are checked before anything deploys.
+# FE: the fe release carries one web build per stage with its config.json already baked in (fe
+#     checks its own keys at build time); the hub only adds the versions.
 set -euo pipefail
 
 STAGE="$1"
 PAGES="$2"
 FILE="$STAGE/versions.yaml"
 OWNER="tanatornmokkhao"
-FE_CONF="config/fe/$STAGE.json"
 SJ="${SECRETS_JSON:-}"
 [ -n "$SJ" ] || SJ='{}'
 VJ="${VARS_JSON:-}"
@@ -70,19 +68,6 @@ if [ "$BE" != none ]; then
   fi
 fi
 
-if [ "$FE" != none ]; then
-  FE_EXAMPLE=$(example fe "$FE")
-  if [ -z "$FE_EXAMPLE" ]; then
-    echo "fe $FE has no .env.example: its settings are not checked."
-  else
-    HAVE=$(jq -r '.runtime // {} | to_entries[] | select(.value != "") | .key' "$FE_CONF" | sort -u)
-    for k in $(comm -23 <(keys <<<"$FE_EXAMPLE") <(echo "$HAVE")); do
-      PROBLEMS+=("fe: $k has no value in $FE_CONF")
-    done
-    echo "fe $FE needs: $(keys <<<"$FE_EXAMPLE" | paste -sd, -)"
-  fi
-fi
-
 if [ ${#PROBLEMS[@]} -gt 0 ]; then
   printf '::error::%s\n' "${PROBLEMS[@]}"
   rm -f "${ENVFILE:-}"
@@ -111,9 +96,18 @@ fi
 
 if [ "$FE" != none ]; then
   WORK=$(mktemp -d)
-  gh release download "$STAGE/v$FE" -R "$OWNER/ff-poc-fe" -p web-build.zip -D "$WORK"
+  CONF="$PAGES/$STAGE/config.json"
   rm -rf "${PAGES:?}/$STAGE" && mkdir -p "$PAGES/$STAGE"
-  unzip -q "$WORK/web-build.zip" -d "$PAGES/$STAGE"
-  jq --arg be "$BE" --arg fe "$FE" '. + {versions: {be: $be, fe: $fe}}' "$FE_CONF" > "$PAGES/$STAGE/config.json"
-  echo "fe $FE copied to $PAGES/$STAGE with runtime keys: $(jq -r '.runtime // {} | keys | join(", ")' "$FE_CONF")"
+  if gh release download "$STAGE/v$FE" -R "$OWNER/ff-poc-fe" -p "web-build-$STAGE.zip" -D "$WORK" 2>/dev/null; then
+    unzip -q "$WORK/web-build-$STAGE.zip" -d "$PAGES/$STAGE"
+    [ -f "$CONF" ] || { echo "web-build-$STAGE.zip of fe $FE has no config.json"; exit 1; }
+  else
+    # Releases made before per-stage builds have one web-build.zip without a config.json.
+    gh release download "$STAGE/v$FE" -R "$OWNER/ff-poc-fe" -p web-build.zip -D "$WORK"
+    unzip -q "$WORK/web-build.zip" -d "$PAGES/$STAGE"
+    jq -n --arg s "$STAGE" '{env: $s, flags: {}}' > "$CONF"
+    echo "::warning::fe $FE predates per-stage builds: it gets no runtime settings."
+  fi
+  jq --arg be "$BE" --arg fe "$FE" '. + {versions: {be: $be, fe: $fe}}' "$CONF" > "$CONF.new" && mv "$CONF.new" "$CONF"
+  echo "fe $FE ($STAGE build) copied to $PAGES/$STAGE with runtime keys: $(jq -r '.runtime // {} | keys | join(", ")' "$CONF")"
 fi

@@ -105,10 +105,11 @@ jobs:
         run: |
           set -euo pipefail
           V="${{ steps.t.outputs.version }}"
+          STAGE="${{ steps.t.outputs.stage }}"
           ready() {
             case "$1" in
               be) docker buildx imagetools inspect "ghcr.io/${OWNER,,}/ff-poc-be:$V" >/dev/null 2>&1 ;;
-              fe) gh release view "$TAG" -R "$OWNER/ff-poc-fe" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx web-build.zip ;;
+              fe) gh release view "$TAG" -R "$OWNER/ff-poc-fe" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx "web-build-$STAGE.zip" ;;
             esac
           }
           while read -r app repo sha; do

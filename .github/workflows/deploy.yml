@@ -5,7 +5,7 @@ name: Deploy
 on:
   push:
     branches: [main]
-    paths: ['staging/**', 'prod/**', 'config/**', 'scripts/**']
+    paths: ['staging/**', 'prod/**', 'scripts/**']
   workflow_dispatch:
     inputs:
       stage:
@@ -36,8 +36,8 @@ jobs:
           if git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then CHANGED=$(git diff --name-only "$BEFORE" HEAD)
           else CHANGED=$(git ls-files); fi
           echo "$CHANGED"
-          grep -qE '^(staging/|config/fe/staging\.|scripts/)' <<< "$CHANGED" && echo "staging=true" >> "$GITHUB_OUTPUT" || true
-          grep -qE '^(prod/|config/fe/prod\.)' <<< "$CHANGED" && echo "prod=true" >> "$GITHUB_OUTPUT" || true
+          grep -qE '^(staging/|scripts/)' <<< "$CHANGED" && echo "staging=true" >> "$GITHUB_OUTPUT" || true
+          grep -qE '^prod/' <<< "$CHANGED" && echo "prod=true" >> "$GITHUB_OUTPUT" || true
 
   staging:
     needs: changes
