@@ -5,10 +5,13 @@ the **Terraform** workflow only checks it (`fmt`, `validate`).
 
 | Where | Holds | Who changes it |
 | --- | --- | --- |
-| `config/be/<stage>.env` (git) | BE settings that are not secret | a PR, like code |
-| `config/be/secrets.list` (git) | the **names** of BE secrets | a PR |
-| Parameter Store `/ff-poc/<stage>/be/<NAME>` (`SecureString`) | secret **values** | an admin, by hand |
-| `config/fe/<stage>.json` (git) | all FE settings (the browser sees them, so none is secret) | a PR |
+| `.env.example` in `ff-poc-be` / `ff-poc-fe` | the **names** of every key the app reads; `# secret` marks a secret | a PR in that app, with the code |
+| `config/be/<stage>.env` (git) | BE values that are not secret | a PR, like code |
+| Parameter Store `/ff-poc/<stage>/be/<KEY>` (`SecureString`) | secret **values** | an admin, by hand |
+| `config/fe/<stage>.json` (git) | all FE values (the browser sees them, so none is secret) | a PR |
+
+Until this is applied, the hub's GitHub environments hold the BE secrets as `BE_<KEY>` (fake values)
+in place of Parameter Store.
 
 What it creates, per stage (`staging`, `prod`):
 
@@ -39,5 +42,7 @@ An admin sets each secret once per stage, from their own machine:
 aws ssm put-parameter --type SecureString --name /ff-poc/prod/be/DB_PASSWORD --value '...'
 ```
 
-Adding a secret: add its name to `config/be/secrets.list` in a PR, set its value in each stage,
-then merge. The deploy stops and names any secret that is missing.
+Adding a key: add it to the app's `.env.example` in the same PR as the code (with `# secret` if it
+is one), then give it a value in each stage: `config/<app>/<stage>.*` for a public value,
+Parameter Store for a secret. The deploy of a release whose `.env.example` has the key stops and
+names it until every stage it deploys to has a value.

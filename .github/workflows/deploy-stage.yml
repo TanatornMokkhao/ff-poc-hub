@@ -10,8 +10,9 @@ on:
 permissions:
   contents: write
 
+# One queue per stage, so a prod deploy waiting for approval never holds up staging.
 concurrency:
-  group: pages
+  group: pages-${{ inputs.stage }}
   cancel-in-progress: false
 
 jobs:
@@ -31,10 +32,12 @@ jobs:
           if git show-ref -q refs/heads/gh-pages; then git worktree add pages gh-pages
           else git worktree add --orphan -b gh-pages pages; fi
 
-      # Settings come from config/ in git; this environment holds only the role to assume in AWS.
+      # Public values come from config/ in git. The BE_<KEY> secrets of this environment stand in
+      # for Parameter Store until there is a real AWS account.
       - run: bash scripts/deploy.sh "${{ inputs.stage }}" pages
         env:
           AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          SECRETS_JSON: ${{ toJSON(secrets) }}
 
       - name: Publish
         working-directory: pages
@@ -50,7 +53,8 @@ jobs:
           git add -A
           git diff --cached --quiet && { echo "Nothing changed on Pages."; exit 0; }
           git commit -qm "deploy ${{ inputs.stage }} from ${GITHUB_SHA::7}"
-          git push origin gh-pages
+          for i in 1 2 3; do git push -q origin gh-pages && exit 0; git pull -q --rebase origin gh-pages; done
+          exit 1
 
       - name: Summary
         run: |

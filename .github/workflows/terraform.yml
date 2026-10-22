@@ -4,10 +4,10 @@ name: Terraform
 # (account 000000000000); with real ones it would assume TF_ROLE_ARN through OIDC and plan.
 on:
   pull_request:
-    paths: ['infra/**', 'config/be/secrets.list']
+    paths: ['infra/**']
   push:
     branches: [main]
-    paths: ['infra/**', 'config/be/secrets.list']
+    paths: ['infra/**']
   workflow_dispatch:
 
 permissions:
@@ -47,8 +47,6 @@ jobs:
               echo "1. assume \`$TF_ROLE_ARN\` through GitHub OIDC (no AWS keys stored)"
               echo "2. \`terraform init\` with state in \`s3://$TF_STATE_BUCKET/hub/terraform.tfstate\` ($AWS_REGION)"
               echo "3. \`terraform plan\`, and \`apply\` after an approval"
-              echo
-              echo "Secret names it grants access to: $(grep -Ev '^\s*(#|$)' ../config/be/secrets.list | paste -sd, -)"
             } >> "$GITHUB_STEP_SUMMARY"
             echo "Mock AWS variables: plan skipped."
           else
