@@ -10,6 +10,14 @@
   },
   "runtime": {
     "API_BASE_URL": "https://api.staging.example.com",
-    "ANALYTICS_KEY": "staging-fake-analytics"
+    "WS_BASE_URL": "wss://ws.staging.example.com",
+    "API_VERSION": "v1.2",
+    "STRIPE_PUBLISH_KEY": "pk_test_fake_stg",
+    "RECAPTCHA_SITE_KEY": "fake-recaptcha-stg",
+    "GOOGLE_PLACES_API_KEY": "fake-places-stg",
+    "DD_APP_ID": "fake-dd-app-stg",
+    "DD_CLIENT_TOKEN": "fake-dd-token-stg",
+    "SUPPORT_EMAIL": "help@example.com",
+    "FEATURE_WELCOME_TOUR": "true"
   }
 }
