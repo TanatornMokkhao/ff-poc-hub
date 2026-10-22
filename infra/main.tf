@@ -55,7 +55,7 @@ data "aws_iam_policy_document" "be_push_trust" {
     condition {
       test     = "StringLike"
       variable = "${local.oidc}:sub"
-      values   = ["repo:${var.github_owner}/${var.be_repo}:ref:refs/tags/*"]
+      values   = ["${var.be_sub_prefix}:ref:refs/tags/*"]
     }
   }
 }
@@ -105,7 +105,7 @@ data "aws_iam_policy_document" "deploy_trust" {
     condition {
       test     = "StringEquals"
       variable = "${local.oidc}:sub"
-      values   = ["repo:${var.github_owner}/${var.hub_repo}:environment:${each.value}"]
+      values   = ["${var.hub_sub_prefix}:environment:${each.value}"]
     }
   }
 }
@@ -169,7 +169,7 @@ data "aws_iam_policy_document" "runtime_trust" {
     condition {
       test     = "StringEquals"
       variable = "${local.oidc}:sub"
-      values   = ["repo:${var.github_owner}/${var.hub_repo}:environment:${each.value}"]
+      values   = ["${var.hub_sub_prefix}:environment:${each.value}"]
     }
   }
 }
