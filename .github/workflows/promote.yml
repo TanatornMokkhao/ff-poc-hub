@@ -1,0 +1,63 @@
+name: Promote to prod
+
+# Releases to prod exactly what an rc tested, without typing a tag or picking a target.
+# Leave "rc" empty to promote what staging runs now; give a number (9) to promote that rc of the
+# same version instead. Creates prod/vX.Y.Z on that rc's hub commit; the Release workflow then
+# reuses the rc's builds and Deploy waits for the production approval as usual.
+on:
+  workflow_dispatch:
+    inputs:
+      rc:
+        description: rc number to promote (empty = what staging runs now)
+        type: string
+        required: false
+      notes:
+        description: Release notes (optional)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    env:
+      # A token, not GITHUB_TOKEN: a tag made with GITHUB_TOKEN would not start the Release workflow.
+      GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+      RC_INPUT: ${{ inputs.rc }}
+      NOTES: ${{ inputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pick the rc
+        run: |
+          set -euo pipefail
+          CUR=$(sed -n 's/^be:[[:space:]]*\([^[:space:]#]*\).*/\1/p' staging/versions.yaml)
+          [[ "$CUR" =~ ^([0-9]+\.[0-9]+\.[0-9]+)-rc\.([0-9]+)$ ]] || { echo "::error::Staging runs '$CUR', not an rc."; exit 1; }
+          V="${BASH_REMATCH[1]}"; N="${RC_INPUT:-${BASH_REMATCH[2]}}"
+          [[ "$N" =~ ^[0-9]+$ ]] || { echo "::error::rc must be a number, got '$N'."; exit 1; }
+          RC="staging/v$V-rc.$N"
+          git rev-parse -q --verify "refs/tags/$RC" >/dev/null || { echo "::error::There is no $RC."; exit 1; }
+          if git rev-parse -q --verify "refs/tags/prod/v$V" >/dev/null; then
+            echo "::error::prod/v$V already exists. Release tags are permanent: release the next version."; exit 1
+          fi
+          echo "V=$V" >> "$GITHUB_ENV"; echo "RC=$RC" >> "$GITHUB_ENV"
+          echo "SHA=$(git rev-list -n1 "$RC")" >> "$GITHUB_ENV"
+          [ -z "$RC_INPUT" ] || [ "$N" = "${BASH_REMATCH[2]}" ] || echo "::warning::Promoting $RC while staging runs $CUR."
+
+      - name: Create prod/v${{ env.V }}
+        run: |
+          set -euo pipefail
+          BODY=$(printf 'Promoted from %s (hub %s).\n\n%s\n' "$RC" "${SHA::7}" "$NOTES")
+          gh release create "prod/v$V" -R "$GITHUB_REPOSITORY" --target "$SHA" --title "prod/v$V" --notes "$BODY" --latest
+          {
+            echo "### prod/v$V created from $RC"
+            echo "The Release run tags the apps and reuses the $RC builds; approve **production** in Deploy and **app-store** in ff-poc-fe."
+          } >> "$GITHUB_STEP_SUMMARY"
