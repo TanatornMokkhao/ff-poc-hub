@@ -23,4 +23,4 @@ The full release strategy is in [docs/RELEASE-STRATEGY.md](docs/RELEASE-STRATEGY
    If a pin is behind its app's `main` (a merge still in CI), the release stops and says which commits are missing; that rc number is used up, so release the next one. To ship older code on purpose, put `[skip-bump-check]` in the release notes.
 4. A fix during testing: merge it in the app repo, wait for the pin, then release `staging/v1.0.0-rc.2`. An app whose commit did not change reuses its rc.1 build.
 5. Staging passes: release `prod/v1.0.0` **on the same hub commit as the rc that passed** (Target: pick that rc's tag or commit). Each app reuses that rc's build; approve the `production` deployment here and the `app-store` step in `ff-poc-fe` (simulated).
-6. Rollback: revert the last commit in `prod/versions.yaml` and approve the deploy.
+6. Rollback: Actions → **Rollback production** → leave the version empty (goes to the previous prod release), give a reason, then approve the deploy. No new tag and no rebuild; the mobile app stays as it is. Fix forward with the next patch version.

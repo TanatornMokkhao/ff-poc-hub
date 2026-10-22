@@ -1,0 +1,89 @@
+name: Rollback production
+
+# Puts production back on an earlier prod release, using the builds that release already has
+# (no new tag, no rebuild). Leave the version empty to go to the release before the current one.
+# The Deploy workflow then asks for the production approval as usual.
+# The mobile app cannot be rolled back in the stores; its line in prod/versions.yaml is left as is.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: X.Y.Z to go back to (empty = the prod release before the current one)
+        type: string
+        default: ''
+      reason:
+        description: Why (goes into the commit message)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.DEPLOY_REPO_TOKEN }}
+      OWNER: ${{ github.repository_owner }}
+      WANT: ${{ inputs.version }}
+      REASON: ${{ inputs.reason }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.DEPLOY_REPO_TOKEN }}
+
+      - name: Pick the version
+        run: |
+          set -euo pipefail
+          [ -n "$GH_TOKEN" ] || { echo "::error::Set the DEPLOY_REPO_TOKEN secret in this repo."; exit 1; }
+          get() { sed -n "s/^$1:[[:space:]]*\([^[:space:]#]*\).*/\1/p" prod/versions.yaml; }
+          CUR=$(get fe); [ "$CUR" != none ] || CUR=$(get be)
+          [ "$CUR" != none ] || { echo "::error::Production runs nothing yet."; exit 1; }
+          if [ -n "$WANT" ]; then
+            V="${WANT#v}"
+            [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::'$WANT' is not X.Y.Z."; exit 1; }
+          else
+            V=$(git tag --list 'prod/v*' | sed 's#^prod/v##' | sort -V | awk -v cur="$CUR" '$0 == cur {print prev; exit} {prev = $0}')
+            [ -n "$V" ] || { echo "::error::No prod release before $CUR."; exit 1; }
+          fi
+          [ "$V" != "$CUR" ] || { echo "::error::Production already runs $V."; exit 1; }
+          git rev-parse -q --verify "refs/tags/prod/v$V" >/dev/null || { echo "::error::There is no prod/v$V release to go back to."; exit 1; }
+          echo "CUR=$CUR" >> "$GITHUB_ENV"
+          echo "V=$V" >> "$GITHUB_ENV"
+          echo "Rolling back production: $CUR -> $V"
+
+      - name: The builds of that release must still exist
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "ghcr.io/${OWNER,,}/ff-poc-be:$V" >/dev/null \
+            || { echo "::error::Image ff-poc-be:$V is gone; rollback would fail."; exit 1; }
+          gh release view "prod/v$V" -R "$OWNER/ff-poc-fe" --json assets --jq '.assets[].name' | grep -qx web-build.zip \
+            || { echo "::error::Release prod/v$V in ff-poc-fe has no web-build.zip; rollback would fail."; exit 1; }
+          echo "be image and fe web build for $V are there"
+
+      - name: Point production at it (this starts Deploy)
+        run: |
+          set -euo pipefail
+          git config user.name "ff-poc release bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for app in be fe; do
+            sha=$(git ls-tree "prod/v$V" "$app" | awk '{print $3}')
+            sed -i -E "s/^($app:[[:space:]]*)[^[:space:]#]+.*/\1$V   # ${sha::7}/" prod/versions.yaml
+          done
+          cat prod/versions.yaml
+          git commit -qam "prod: rollback $CUR -> $V ($REASON)"
+          git push -q origin HEAD:main
+          {
+            echo "### Production rollback: $CUR → $V"
+            echo "Reason: $REASON"
+            echo
+            echo "Approve the **production** deployment in the Deploy run to finish."
+            echo
+            echo "Not rolled back: the mobile app (users who updated keep $CUR; ship a fix as a new version)."
+            echo "Next: fix forward with staging/v<next patch>-rc.1, never reuse $CUR."
+          } >> "$GITHUB_STEP_SUMMARY"
