@@ -1,28 +1,40 @@
 #!/usr/bin/env bash
 # Deploys what <stage>/versions.yaml names, BE first, then FE.
 #   scripts/deploy.sh staging|prod <pages-dir>
-# Env vars (secrets of the GitHub Environment the job runs in):
-#   BE_ENV  the BE .env for this stage, passed to the container as --env-file
-#   FE_ENV  KEY=VALUE lines added to the FE config.json under "runtime" (public: the browser reads it)
-# BE: pulls the image, runs it with BE_ENV, checks /health, /version and /info (stands in for a real server).
-# FE: downloads the web build attached to the fe release, writes config.json from config/<stage>.json
-#     and FE_ENV, and copies it into <pages-dir>/<stage> for GitHub Pages.
+# Settings come from git, secrets from Parameter Store (see infra/README.md):
+#   config/be/<stage>.env    BE settings that are not secret
+#   config/be/secrets.list   names of BE secrets; values at /ff-poc/<stage>/be/<NAME>
+#   config/fe/<stage>.json   FE config.json (public: the browser reads it)
+# AWS is simulated here: AWS_ROLE_ARN is a mock, so the secrets get placeholder values. On a real
+# account the deploy role writes the .env values to Parameter Store and the server reads its path.
 set -euo pipefail
 
 STAGE="$1"
 PAGES="$2"
 FILE="$STAGE/versions.yaml"
 OWNER="tanatornmokkhao"
+BE_CONF="config/be/$STAGE.env"
+SECRETS="config/be/secrets.list"
+FE_CONF="config/fe/$STAGE.json"
 
 get() { sed -n "s/^$1:[[:space:]]*\([^[:space:]#]*\).*/\1/p" "$FILE"; }
+lines() { grep -Ev '^[[:space:]]*(#|$)' "$1" || true; }
+names() { lines "$1" | sed 's/=.*//'; }
 BE=$(get be)
 FE=$(get fe)
 echo "Deploying $STAGE: be=$BE fe=$FE"
 
 if [ "$BE" != none ]; then
-  [ -n "${BE_ENV:-}" ] || { echo "BE_ENV is empty: add it to the '$STAGE' environment's secrets."; exit 1; }
+  LEAK=$(comm -12 <(names "$BE_CONF" | sort) <(names "$SECRETS" | sort))
+  [ -z "$LEAK" ] || { echo "$BE_CONF holds secrets ($LEAK): remove them and set them in Parameter Store."; exit 1; }
+
+  echo "AWS role (simulated): ${AWS_ROLE_ARN:-not set}"
+  echo "Would write to /ff-poc/$STAGE/be/ as String: $(names "$BE_CONF" | paste -sd, -)"
+  echo "Would check these SecureString names exist: $(names "$SECRETS" | paste -sd, -)"
+
   ENVFILE=$(mktemp)
-  printf '%s\n' "$BE_ENV" > "$ENVFILE"
+  lines "$BE_CONF" > "$ENVFILE"
+  for k in $(names "$SECRETS"); do echo "$k=simulated-from-parameter-store" >> "$ENVFILE"; done
   WANT_ENV=$(sed -n 's/^APP_ENV=//p' "$ENVFILE")
   IMAGE="ghcr.io/$OWNER/ff-poc-be:$BE"
   docker pull "$IMAGE"
@@ -38,7 +50,7 @@ if [ "$BE" != none ]; then
   if [ "$(jq -r '.env // empty' <<<"$INFO")" != "" ]; then
     [ "$(jq -r .env <<<"$INFO")" = "$WANT_ENV" ] || { echo "be runs with APP_ENV=$(jq -r .env <<<"$INFO"), expected $WANT_ENV"; exit 1; }
   fi
-  echo "be $BE is healthy with the $STAGE env"
+  echo "be $BE is healthy with the $STAGE settings"
 fi
 
 if [ "$FE" != none ]; then
@@ -46,8 +58,6 @@ if [ "$FE" != none ]; then
   gh release download "$STAGE/v$FE" -R "$OWNER/ff-poc-fe" -p web-build.zip -D "$WORK"
   rm -rf "${PAGES:?}/$STAGE" && mkdir -p "$PAGES/$STAGE"
   unzip -q "$WORK/web-build.zip" -d "$PAGES/$STAGE"
-  RUNTIME=$(printf '%s\n' "${FE_ENV:-}" | jq -Rn '[inputs | select(test("^[A-Za-z_][A-Za-z0-9_]*=")) | capture("^(?<k>[^=]+)=(?<v>.*)$")] | map({(.k): .v}) | add // {}')
-  jq --arg be "$BE" --arg fe "$FE" --argjson runtime "$RUNTIME" \
-    '. + {versions: {be: $be, fe: $fe}, runtime: $runtime}' "config/$STAGE.json" > "$PAGES/$STAGE/config.json"
-  echo "fe $FE copied to $PAGES/$STAGE with runtime keys: $(jq -r 'keys | join(", ")' <<<"$RUNTIME")"
+  jq --arg be "$BE" --arg fe "$FE" '. + {versions: {be: $be, fe: $fe}}' "$FE_CONF" > "$PAGES/$STAGE/config.json"
+  echo "fe $FE copied to $PAGES/$STAGE with runtime keys: $(jq -r '.runtime // {} | keys | join(", ")' "$FE_CONF")"
 fi

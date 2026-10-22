@@ -1,7 +1,0 @@
-{
-  "env": "prod",
-  "apiBaseUrl": "https://api.example.com",
-  "flags": {
-    "welcomeBanner": false
-  }
-}
