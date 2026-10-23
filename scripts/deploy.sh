@@ -18,6 +18,22 @@ OWNER="tanatornmokkhao"
 SSM_PATH="/ff-poc/$STAGE/be/"
 
 get() { sed -n "s/^$1:[[:space:]]*\([^[:space:]#]*\).*/\1/p" "$FILE"; }
+# The commit an app is pinned to (the "# abc1234" after its version).
+pin() { sed -n "s/^$1:[^#]*#[[:space:]]*\([0-9a-f]*\).*/\1/p" "$FILE"; }
+# Fails unless a commit the build reports for itself is the pinned one; builds that report none
+# (made before builds carried their commit) only warn.
+same_commit() {
+  local what=$1 got=$2 want=$3
+  if [ -z "$got" ] || [ "$got" = unknown ] || [ "$got" = "<no value>" ]; then
+    echo "::warning::$what does not say which commit it holds (built before builds carried it)."
+  elif [ -z "$want" ]; then
+    echo "::warning::$FILE has no pinned commit to compare $what with."
+  elif [[ "$got" != "$want"* ]]; then
+    echo "::error::$what holds commit ${got::7}, but $FILE pins ${want::7}."; exit 1
+  else
+    echo "Check: $what holds the pinned commit ${want::7}"
+  fi
+}
 lines() { grep -Ev '^[[:space:]]*(#|$)' || true; }
 keys() { lines | sed 's/=.*//' | sort -u; }
 secret_keys() { grep -E '#[[:space:]]*secret[[:space:]]*$' | keys; }
@@ -94,6 +110,7 @@ if [ "$BE" != none ]; then
     docker pull -q "$IMAGE"
     echo "::warning::be $BE predates ECR: pulled from GHCR; it does not load settings from Parameter Store."
   fi
+  same_commit "image $IMAGE" "$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE" 2>/dev/null || true)" "$(pin be)"
   ENVFILE=$(mktemp)
   chmod 600 "$ENVFILE"
   printf '%s\n' "AWS_ACCESS_KEY_ID=$RUNTIME_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY=$RUNTIME_SECRET_ACCESS_KEY" \
@@ -106,8 +123,10 @@ if [ "$BE" != none ]; then
     echo "::error::be $BE did not start. Its log:"; docker logs "be-$STAGE" 2>&1 | tail -20; exit 1
   fi
   docker logs "be-$STAGE" 2>&1 | head -3
-  GOT=$(curl -fs localhost:3000/version | jq -r .version)
+  VER=$(curl -fs localhost:3000/version)
+  GOT=$(jq -r .version <<<"$VER")
   [ "$GOT" = "$BE" ] || { echo "be answered version $GOT, expected $BE"; exit 1; }
+  same_commit "the running be (/version)" "$(jq -r '.commit // empty' <<<"$VER")" "$(pin be)"
   INFO=$(curl -fs localhost:3000/info)
   echo "be /info: $INFO"
   if [ "$(jq -r '.env // empty' <<<"$INFO")" != "" ] && [ "$IMAGE" = "$ECR_REPOSITORY_URL:$BE" ]; then
@@ -123,6 +142,13 @@ if [ "$FE" != none ]; then
   if gh release download "$STAGE/v$FE" -R "$OWNER/ff-poc-fe" -p "web-build-$STAGE.zip" -D "$WORK" 2>/dev/null; then
     unzip -q "$WORK/web-build-$STAGE.zip" -d "$PAGES/$STAGE"
     [ -f "$CONF" ] || { echo "web-build-$STAGE.zip of fe $FE has no config.json"; exit 1; }
+    INFO_FILE="$PAGES/$STAGE/build-info.json"
+    if [ -f "$INFO_FILE" ]; then
+      [ "$(jq -r .stage "$INFO_FILE")" = "$STAGE" ] || { echo "::error::web-build-$STAGE.zip was built for $(jq -r .stage "$INFO_FILE"), not $STAGE."; exit 1; }
+      same_commit "web-build-$STAGE.zip" "$(jq -r .commit "$INFO_FILE")" "$(pin fe)"
+    else
+      same_commit "web-build-$STAGE.zip" "" "$(pin fe)"
+    fi
   else
     # Releases made before per-stage builds have one web-build.zip without a config.json.
     gh release download "$STAGE/v$FE" -R "$OWNER/ff-poc-fe" -p web-build.zip -D "$WORK"
@@ -134,14 +160,16 @@ if [ "$FE" != none ]; then
   echo "fe $FE ($STAGE build) copied to $PAGES/$STAGE with runtime keys: $(jq -r '.runtime // {} | keys | join(", ")' "$CONF")"
 
   if [ -n "${WEB_BUCKET:-}" ]; then
-    # Hashed assets can be cached for good; index.html and config.json must be fetched fresh.
+    # Hashed assets can be cached for good; the files that say what this build is must be fresh.
+    FRESH=(index.html config.json build-info.json)
     aws s3 sync "$PAGES/$STAGE/" "s3://$WEB_BUCKET/" --delete --only-show-errors \
-      --exclude index.html --exclude config.json --cache-control "public, max-age=31536000, immutable"
-    for f in index.html config.json; do
+      "${FRESH[@]/#/--exclude=}" --cache-control "public, max-age=31536000, immutable"
+    for f in "${FRESH[@]}"; do
+      [ -f "$PAGES/$STAGE/$f" ] || continue
       aws s3 cp "$PAGES/$STAGE/$f" "s3://$WEB_BUCKET/$f" --only-show-errors --cache-control "no-store"
     done
     aws cloudfront create-invalidation --distribution-id "$CF_DISTRIBUTION_ID" \
-      --paths /index.html /config.json --query Invalidation.Id --output text >/dev/null
+      --paths "${FRESH[@]/#//}" --query Invalidation.Id --output text >/dev/null
     echo "fe $FE uploaded to s3://$WEB_BUCKET and CloudFront refreshed: ${WEB_URL:-}"
   else
     echo "::warning::WEB_BUCKET is not set for $STAGE: the web went to GitHub Pages only."

@@ -1,0 +1,56 @@
+name: Drift check
+
+# Compares what each stage should run (<stage>/versions.yaml on main) with what its live site
+# says it runs (config.json, and build-info.json written by the build itself). A difference while
+# a Deploy run of that stage is queued, waiting for approval or running is reported as deploying;
+# any other difference fails this run, so GitHub notifies. The BE has no long-running server in
+# this POC, so only the site is checked; with ECS, add its /version here.
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      URL_staging: ${{ vars.WEB_URL_STAGING }}
+      URL_prod: ${{ vars.WEB_URL_PROD }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare
+        run: |
+          set -euo pipefail
+          DEPLOYING=$(gh run list --workflow Deploy --limit 10 --json status --jq '[.[]|select(.status!="completed")]|length')
+          DRIFT=0
+          {
+            echo "### What runs where"
+            echo "| Stage | should run (fe / be) | site says | build-info commit | result |"
+            echo "| --- | --- | --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for s in staging prod; do
+            F="$s/versions.yaml"
+            get() { sed -n "s/^$1:[[:space:]]*\([^[:space:]#]*\).*/\1/p" "$F"; }
+            pin() { sed -n "s/^$1:[^#]*#[[:space:]]*\([0-9a-f]*\).*/\1/p" "$F"; }
+            FE=$(get fe); BE=$(get be); PIN=$(pin fe); URLV="URL_$s"; URL="${!URLV}"
+            if [ "$FE" = none ]; then echo "| $s | none | - | - | nothing deployed |" >> "$GITHUB_STEP_SUMMARY"; continue; fi
+            [ -n "$URL" ] || { echo "::error::Repo variable WEB_URL_${s^^} is not set."; DRIFT=1; continue; }
+            SITE=$(curl -fsS -m 20 "${URL%/}/config.json" | jq -r '"\(.versions.fe) / \(.versions.be)"' 2>/dev/null || echo "unreachable")
+            BUILT=$(curl -fsS -m 20 "${URL%/}/build-info.json" 2>/dev/null | jq -r '"\(.commit[0:7]) (\(.stage))"' 2>/dev/null || echo "none")
+            WANT="$FE / $BE"; OK=1
+            [ "$SITE" = "$WANT" ] || OK=0
+            case "$BUILT" in none) ;; "$PIN ($s)") ;; *) OK=0 ;; esac
+            if [ "$OK" = 1 ]; then RESULT="in sync"
+            elif [ "$DEPLOYING" != 0 ]; then RESULT="deploying (a Deploy run is not finished)"
+            else RESULT="**drift**"; DRIFT=1; echo "::error::$s should run $WANT (fe ${PIN:-?}), its site says $SITE, build-info $BUILT."; fi
+            echo "| $s | $WANT (fe ${PIN:-?}) | $SITE | $BUILT | $RESULT |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "BE not checked: no long-running server in this POC." >> "$GITHUB_STEP_SUMMARY"
+          exit "$DRIFT"
