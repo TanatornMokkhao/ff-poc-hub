@@ -22,7 +22,8 @@ _Written by the Deploy workflow after each deploy; mobile is what the stores or 
 | FE settings | Variables of the `staging` / `production` environments in `ff-poc-fe`. Each rc bakes them into a staging and a prod build of the web and the apps; the hub deploys the stage's web build and adds the versions. |
 | BE settings | Never in git or GitHub: AWS Parameter Store `/ff-poc/<stage>/be/<KEY>` (`String`, or `SecureString` for a secret), read by the server at boot. Which keys the BE needs is its own `.env.example`; the deploy checks every one is there, by name only, before it starts. See [infra/README.md](infra/README.md). |
 | `infra/` | Terraform for the AWS side (account 375355731232, ap-southeast-1): `bootstrap/` applied once by hand, the rest applied by the Terraform workflow on merge. See [infra/README.md](infra/README.md). |
-| `scripts/deploy.sh` | Deploys a stage: BE first, then FE. |
+| `scripts/deploy.sh` | Deploys a stage: BE first, then FE. Before calling it healthy it checks that the image (revision label and `/version`) and the web build (`build-info.json`) hold the pinned commits; ECR tags are immutable. |
+| Drift check (Actions, hourly) | Compares each stage's `versions.yaml` with what its live site says (`config.json`, `build-info.json`); fails and notifies on a difference unless a deploy is still running. |
 
 Sites: [staging](https://d3cl8zzlgdpw98.cloudfront.net/) · [prod](https://d2qz35os9uekpn.cloudfront.net/) (S3 + CloudFront; the GitHub Pages copies under `/staging/` and `/prod/` mirror them)
 

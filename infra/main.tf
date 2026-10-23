@@ -20,7 +20,7 @@ data "aws_iam_policy" "boundary" {
 # many releases; rollback to an older one needs a rebuild.
 resource "aws_ecr_repository" "be" {
   name                 = "ff-poc-be"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
   force_delete         = true
   image_scanning_configuration {
     scan_on_push = true

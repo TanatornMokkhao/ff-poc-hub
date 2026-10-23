@@ -87,33 +87,35 @@ jobs:
         env:
           WEB_URL: ${{ vars.WEB_URL }}
 
-      # Rewrites the "Running now" block of the README from both versions.yaml files on main. The
-      # README is outside the Deploy paths, so this commit does not deploy anything.
+      # Rewrites only this stage's row of the README's "Running now" block, from the versions.yaml
+      # this job just deployed; the other stage's row is left as its own last deploy wrote it, so a
+      # release still waiting for approval never shows as running. The README is outside the
+      # Deploy paths, so this commit does not deploy anything.
       - name: Show what runs where in the README
         env:
           STAGE: ${{ inputs.stage }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
+          DEPLOYED="$GITHUB_WORKSPACE/$STAGE/versions.yaml"
+          v() { sed -n "s/^$1:[[:space:]]*\([^[:space:]#]*\)[[:space:]]*#*[[:space:]]*\(.*\)/\1 \2/p" "$DEPLOYED"; }
+          cell() { set -- $(v "$1"); [ "${1:-none}" = none ] && echo "none" || echo "\`$1\`${2:+ ($2)}"; }
+          MOBILE=$(set -- $(v mobile); echo "${1:-none}")
+          ROW="| $STAGE | $(cell be) | $(cell fe) | \`$MOBILE\` | $(date -u '+%Y-%m-%d %H:%M UTC') ([run]($RUN_URL)) |"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           for i in 1 2 3 4 5; do
             rm -rf status && git fetch -q origin main && git worktree add -q -f --detach status origin/main
             cd status
-            v() { sed -n "s/^$2:[[:space:]]*\([^[:space:]#]*\)[[:space:]]*#*[[:space:]]*\(.*\)/\1 \2/p" "$1/versions.yaml"; }
-            cell() { set -- $(v "$1" "$2"); [ "${1:-none}" = none ] && echo "none" || echo "\`$1\`${2:+ ($2)}"; }
-            when() { if [ "$1" = "$STAGE" ]; then echo "$(date -u '+%Y-%m-%d %H:%M UTC') ([run]($RUN_URL))"
-              else grep -E "^\| $1 \|" README.md | awk -F'|' '{gsub(/^ +| +$/, "", $6); print $6}' | grep . || echo "-"; fi; }
+            row() { if [ "$1" = "$STAGE" ]; then echo "$ROW"; else grep -E "^\| $1 \|" README.md || echo "| $1 | - | - | - | - |"; fi; }
             {
               echo "<!-- status:start -->"
               echo "| Stage | be | fe | mobile | Last deployed |"
               echo "| --- | --- | --- | --- | --- |"
-              for s in staging prod; do
-                m=$(set -- $(v "$s" mobile); echo "${1:-none}")
-                echo "| $s | $(cell "$s" be) | $(cell "$s" fe) | \`$m\` | $(when "$s") |"
-              done
+              row staging
+              row prod
               echo
-              echo "_Written by the Deploy workflow after each deploy; mobile is what the stores or testers were last given._"
+              echo "_Each row is written by that stage's last successful deploy. mobile is the app build the testers or stores were last given, not what users have installed._"
               echo "<!-- status:end -->"
             } > ../status-block.md
             awk -v f=../status-block.md '/<!-- status:start -->/ {while ((getline l < f) > 0) print l; skip=1; next} /<!-- status:end -->/ {skip=0; next} !skip {print}' README.md > README.new
