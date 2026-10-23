@@ -7,10 +7,10 @@ The one place that says what runs where. App repos build and tag; this repo depl
 <!-- status:start -->
 | Stage | be | fe | mobile | Last deployed |
 | --- | --- | --- | --- | --- |
-| staging | `1.0.1-rc.2` (8331f57) | `1.0.1-rc.2` (f60cc62) | `1.0.1-rc.2` | 2026-10-23 04:43 UTC ([run](https://github.com/TanatornMokkhao/ff-poc-hub/actions/runs/39901779488)) |
+| staging | `1.0.1-rc.2` (8331f57) | `1.0.1-rc.2` (f60cc62) | `1.0.1-rc.2` | 2026-10-23 05:01 UTC ([run](https://github.com/TanatornMokkhao/ff-poc-hub/actions/runs/39903433873)) |
 | prod | `1.0.1` (8331f57) | `1.0.1` (f60cc62) | `1.0.1` | - |
 
-_Written by the Deploy workflow after each deploy; mobile is what the stores or testers were last given._
+_Each row is written by that stage's last successful deploy. mobile is the app build the testers or stores were last given, not what users have installed._
 <!-- status:end -->
 
 ## What lives where
