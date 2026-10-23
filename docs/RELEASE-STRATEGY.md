@@ -74,7 +74,7 @@ mobile: 3.1.0   # อ้างอิงเท่านั้น
 
 Rollback คือการ revert commit ใน `deploy` repo ส่วน hotfix คือออก patch version ใหม่ผ่าน flow เดิมแบบย่อ
 
-**Rollback (เร็วที่สุด)**: เปิด PR revert commit ล่าสุดใน `prod/versions.yaml` เช่น 3.2.0 → 3.1.4 แล้ว merge ระบบจะ deploy image เก่ากลับไป ต้องระวัง DB migration ที่ไม่ backward compatible
+**Rollback (เร็วที่สุด)**: เปิด PR revert commit ล่าสุดใน `prod/versions.yaml` เช่น 3.2.0 → 3.1.4 แล้ว merge ระบบจะ deploy image เก่ากลับไป DB migration ไม่มี down: be ใช้ expand / contract (`MIGRATIONS.md` ใน ff-poc-be) CI ของ be รัน code release ก่อนบน schema ใหม่ทุก PR และ workflow Rollback production ไม่ยอมถอยต่ำกว่า `removes-use-from` ของ contract migration ที่ prod รันไปแล้ว
 
 **Hotfix กรณี main พร้อมปล่อย**: แก้บน main → tag `v3.2.1-rc.1` → test บน staging → tag `v3.2.1` → PR ใน repo กลาง
 

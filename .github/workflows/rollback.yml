@@ -76,6 +76,32 @@ jobs:
           echo "V=$V" >> "$GITHUB_ENV"
           echo "Rolling back production: $CUR -> $V"
 
+      # Migrations never run down, so going back means old code on today's schema. A contract
+      # migration removed something; code older than its "removes-use-from" still needs it.
+      - name: The schema must still suit that release
+        if: inputs.be
+        run: |
+          set -euo pipefail
+          api() { gh api "repos/$OWNER/ff-poc-be/contents/$1?ref=prod/v$CUR" "${@:2}" 2>/dev/null; }
+          if ! files=$(api migrations --jq '.[].name | select(endswith(".sql"))'); then
+            echo "be $CUR has no migrations: nothing to check."; exit 0
+          fi
+          blocked=""
+          for f in $files; do
+            sql=$(api "migrations/$f" -H "Accept: application/vnd.github.raw")
+            grep -qE '^--[[:space:]]*kind:[[:space:]]*contract[[:space:]]*$' <<<"$sql" || continue
+            from=$(sed -nE 's/^--[[:space:]]*removes-use-from:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' <<<"$sql" | head -1)
+            [ -n "$from" ] || { echo "::error::$f is a contract with no removes-use-from; cannot tell which releases it breaks."; exit 1; }
+            if [ "$(printf '%s\n%s\n' "$V" "$from" | sort -V | head -1)" != "$from" ]; then
+              blocked+="$f (needs $from or later) "
+            fi
+          done
+          if [ -n "$blocked" ]; then
+            echo "::error::Cannot roll be back to $V: prod's schema already ran $blocked. Roll forward with a fix instead."
+            exit 1
+          fi
+          echo "Schema check: every contract migration in be $CUR allows $V."
+
       - name: The builds of that release must still exist
         run: |
           set -euo pipefail

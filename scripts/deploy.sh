@@ -36,8 +36,13 @@ same_commit() {
 }
 lines() { grep -Ev '^[[:space:]]*(#|$)' || true; }
 keys() { lines | sed 's/=.*//' | sort -u; }
-secret_keys() { grep -E '#[[:space:]]*secret[[:space:]]*$' | keys; }
-public_keys() { lines | grep -Ev '#[[:space:]]*secret[[:space:]]*$' | keys; }
+# Markers after a key: "# secret", "# optional" or "# secret optional". An optional key may have
+# no value; when it has one, a secret must still be SecureString.
+SECRET='#[[:space:]]*secret([[:space:]]+optional)?[[:space:]]*$'
+OPTIONAL='#[^=]*optional[[:space:]]*$'
+secret_keys() { grep -E "$SECRET" | keys; }
+public_keys() { lines | grep -Ev "$SECRET" | keys; }
+optional_keys() { grep -E "$OPTIONAL" | keys; }
 # .env.example of an app at the release being deployed; empty when that release has none.
 # On a 404, gh still prints the error body to stdout, so only a successful call's output counts.
 example() {
@@ -66,13 +71,15 @@ if [ "$BE" != none ]; then
   if [ -z "$BE_EXAMPLE" ]; then
     echo "be $BE has no .env.example: its settings are not checked."
   else
+    OPT=$(optional_keys <<<"$BE_EXAMPLE")
+    optional() { grep -qx "$1" <<<"$OPT"; }
     for k in $(public_keys <<<"$BE_EXAMPLE"); do
-      [ -n "$(type_of "$k")" ] || PROBLEMS+=("be: $k has no value at $SSM_PATH$k")
+      [ -n "$(type_of "$k")" ] || optional "$k" || PROBLEMS+=("be: $k has no value at $SSM_PATH$k")
     done
     for k in $(secret_keys <<<"$BE_EXAMPLE"); do
       case "$(type_of "$k")" in
         SecureString) ;;
-        "") PROBLEMS+=("be: secret $k has no value at $SSM_PATH$k") ;;
+        "") optional "$k" || PROBLEMS+=("be: secret $k has no value at $SSM_PATH$k") ;;
         *) PROBLEMS+=("be: secret $k is stored as $(type_of "$k") at $SSM_PATH$k; it must be SecureString") ;;
       esac
     done
@@ -80,6 +87,7 @@ if [ "$BE" != none ]; then
     [ -z "$EXTRA" ] || echo "::warning::$SSM_PATH has keys be $BE does not read: $EXTRA"
     echo "be $BE needs public: $(public_keys <<<"$BE_EXAMPLE" | paste -sd, -)"
     echo "be $BE needs secret: $(secret_keys <<<"$BE_EXAMPLE" | paste -sd, -)"
+    [ -z "$OPT" ] || echo "be $BE optional (may be empty): $(paste -sd, <<<"$OPT")"
     echo "Found under $SSM_PATH: $(paste -sd, <<<"$STORE" | sed 's/ /:/g')"
   fi
 fi
