@@ -123,6 +123,16 @@ if [ "$BE" != none ]; then
   chmod 600 "$ENVFILE"
   printf '%s\n' "AWS_ACCESS_KEY_ID=$RUNTIME_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY=$RUNTIME_SECRET_ACCESS_KEY" \
     "AWS_SESSION_TOKEN=$RUNTIME_SESSION_TOKEN" "AWS_REGION=$AWS_REGION" "SSM_PATH=$SSM_PATH" > "$ENVFILE"
+  # Migrate from the image being deployed, while the old code still runs (expand / contract keeps
+  # the old code working on the new schema). A failure stops here: the new code never starts.
+  if docker run --rm --entrypoint test "$IMAGE" -f migrate.js; then
+    if ! docker run --rm --env-file "$ENVFILE" "$IMAGE" node migrate.js; then
+      rm -f "$ENVFILE"
+      echo "::error::be $BE: migrate failed; deploy stopped, the running be is unchanged."; exit 1
+    fi
+  else
+    echo "be $BE has no migrate.js: nothing to migrate."
+  fi
   docker rm -f "be-$STAGE" >/dev/null 2>&1 || true
   docker run -d --name "be-$STAGE" -p 3000:3000 --env-file "$ENVFILE" -e APP_VERSION="$BE" "$IMAGE" >/dev/null
   rm -f "$ENVFILE"
