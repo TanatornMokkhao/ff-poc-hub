@@ -2,16 +2,24 @@
 
 The one place that says what runs where. App repos build and tag; this repo deploys.
 
+## Running now
+
+<!-- status:start -->
+_Written by the Deploy workflow after each deploy._
+<!-- status:end -->
+
+## What lives where
+
 | File | Meaning |
 | --- | --- |
-| `staging/versions.yaml` | What staging runs. App repos commit here when they tag an rc. |
-| `prod/versions.yaml` | What production runs. Changes only through a PR. |
+| `staging/versions.yaml` | What staging runs. The Release workflow writes it when an rc is released. |
+| `prod/versions.yaml` | What production runs. The Release workflow writes it for a prod release; Rollback production points it back. |
 | FE settings | Variables of the `staging` / `production` environments in `ff-poc-fe`. Each rc bakes them into a staging and a prod build of the web and the apps; the hub deploys the stage's web build and adds the versions. |
 | BE settings | Never in git or GitHub: AWS Parameter Store `/ff-poc/<stage>/be/<KEY>` (`String`, or `SecureString` for a secret), read by the server at boot. Which keys the BE needs is its own `.env.example`; the deploy checks every one is there, by name only, before it starts. See [infra/README.md](infra/README.md). |
-| `infra/` | Terraform example for the AWS side (not applied). See [infra/README.md](infra/README.md). |
+| `infra/` | Terraform for the AWS side (account 375355731232, ap-southeast-1): `bootstrap/` applied once by hand, the rest applied by the Terraform workflow on merge. See [infra/README.md](infra/README.md). |
 | `scripts/deploy.sh` | Deploys a stage: BE first, then FE. |
 
-Sites: [staging](https://tanatornmokkhao.github.io/ff-poc-hub/staging/) · [prod](https://tanatornmokkhao.github.io/ff-poc-hub/prod/)
+Sites: [staging](https://d3cl8zzlgdpw98.cloudfront.net/) · [prod](https://d2qz35os9uekpn.cloudfront.net/) (S3 + CloudFront; the GitHub Pages copies under `/staging/` and `/prod/` mirror them)
 
 The full release strategy is in [docs/RELEASE-STRATEGY.md](docs/RELEASE-STRATEGY.md).
 
