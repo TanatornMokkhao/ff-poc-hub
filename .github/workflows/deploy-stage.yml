@@ -82,5 +82,44 @@ jobs:
           {
             echo "### ${{ inputs.stage }} deployed"
             echo '```yaml'; cat "${{ inputs.stage }}/versions.yaml"; echo '```'
-            echo "Site: https://tanatornmokkhao.github.io/ff-poc-hub/${{ inputs.stage }}/"
+            echo "Site: ${WEB_URL:-https://tanatornmokkhao.github.io/ff-poc-hub/${{ inputs.stage }}/}"
           } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          WEB_URL: ${{ vars.WEB_URL }}
+
+      # Rewrites the "Running now" block of the README from both versions.yaml files on main. The
+      # README is outside the Deploy paths, so this commit does not deploy anything.
+      - name: Show what runs where in the README
+        env:
+          STAGE: ${{ inputs.stage }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for i in 1 2 3 4 5; do
+            rm -rf status && git fetch -q origin main && git worktree add -q -f --detach status origin/main
+            cd status
+            v() { sed -n "s/^$2:[[:space:]]*\([^[:space:]#]*\)[[:space:]]*#*[[:space:]]*\(.*\)/\1 \2/p" "$1/versions.yaml"; }
+            cell() { set -- $(v "$1" "$2"); [ "${1:-none}" = none ] && echo "none" || echo "\`$1\`${2:+ ($2)}"; }
+            when() { if [ "$1" = "$STAGE" ]; then echo "$(date -u '+%Y-%m-%d %H:%M UTC') ([run]($RUN_URL))"
+              else grep -E "^\| $1 \|" README.md | awk -F'|' '{gsub(/^ +| +$/, "", $6); print $6}' | grep . || echo "-"; fi; }
+            {
+              echo "<!-- status:start -->"
+              echo "| Stage | be | fe | mobile | Last deployed |"
+              echo "| --- | --- | --- | --- | --- |"
+              for s in staging prod; do
+                m=$(set -- $(v "$s" mobile); echo "${1:-none}")
+                echo "| $s | $(cell "$s" be) | $(cell "$s" fe) | \`$m\` | $(when "$s") |"
+              done
+              echo
+              echo "_Written by the Deploy workflow after each deploy; mobile is what the stores or testers were last given._"
+              echo "<!-- status:end -->"
+            } > ../status-block.md
+            awk -v f=../status-block.md '/<!-- status:start -->/ {while ((getline l < f) > 0) print l; skip=1; next} /<!-- status:end -->/ {skip=0; next} !skip {print}' README.md > README.new
+            mv README.new README.md
+            if git diff --quiet; then echo "README already current."; cd ..; break; fi
+            git commit -qam "docs: README shows $STAGE deploy"
+            if git push -q origin HEAD:main; then cd ..; break; fi
+            cd ..; git worktree remove -f status; sleep 3
+          done
