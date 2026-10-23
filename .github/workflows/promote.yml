@@ -52,6 +52,41 @@ jobs:
           echo "SHA=$(git rev-list -n1 "$RC")" >> "$GITHUB_ENV"
           [ -z "$RC_INPUT" ] || [ "$N" = "${BASH_REMATCH[2]}" ] || echo "::warning::Promoting $RC while staging runs $CUR."
 
+      # Every app commit prod would gain must already be on that app's main, directly or as a
+      # cherry-pick of a main commit; otherwise the next release from main would lose it.
+      - name: Every change is on main
+        run: |
+          set -euo pipefail
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          in_main() {
+            local s
+            s=$(gh api "repos/$OWNER/ff-poc-$1/compare/main...$2" --jq .status 2>/dev/null) || return 1
+            [ "$s" = behind ] || [ "$s" = identical ]
+          }
+          LAST=$(git tag --list 'prod/v*' --sort=-v:refname | head -1)
+          [ -n "$LAST" ] || { echo "No prod release yet: nothing to compare."; exit 0; }
+          BYPASS=$(git log -1 --format=%B "$SHA" | sed -n 's/^Hotfix-not-on-main: //p')
+          missing=""
+          for app in be fe; do
+            new=$(git ls-tree "$SHA" "$app" | awk '{print $3}')
+            old=$(git ls-tree "$LAST" "$app" | awk '{print $3}')
+            [ "$new" != "$old" ] || continue
+            if in_main "$app" "$new"; then echo "$app ${new::7} is on main"; continue; fi
+            for c in $(gh api "repos/$OWNER/ff-poc-$app/compare/$old...$new" --jq '.commits[].sha'); do
+              in_main "$app" "$c" && continue
+              from=$(gh api "repos/$OWNER/ff-poc-$app/commits/$c" --jq .commit.message | sed -nE 's/.*cherry picked from commit ([0-9a-f]{40}).*/\1/p' | head -1)
+              if [ -n "$from" ] && in_main "$app" "$from"; then echo "$app ${c::7} is a cherry-pick of main ${from::7}"; continue; fi
+              missing+="$app ${c::7} "
+            done
+          done
+          if [ -n "$missing" ]; then
+            if [ -n "$BYPASS" ]; then
+              echo "::warning::Not on main: $missing(allowed by the hotfix: $BYPASS). Bring them to main or the next release loses them."
+            else
+              echo "::error::$RC would ship commits that are not on main: $missing. Merge them into main first."; exit 1
+            fi
+          fi
+
       - name: Create prod/v${{ env.V }}
         run: |
           set -euo pipefail
