@@ -5,7 +5,12 @@ The one place that says what runs where. App repos build and tag; this repo depl
 ## Running now
 
 <!-- status:start -->
-_Written by the Deploy workflow after each deploy._
+| Stage | be | fe | mobile | Last deployed |
+| --- | --- | --- | --- | --- |
+| staging | `1.0.1-rc.2` (8331f57) | `1.0.1-rc.2` (f60cc62) | `1.0.1-rc.2` | 2026-10-23 04:43 UTC ([run](https://github.com/TanatornMokkhao/ff-poc-hub/actions/runs/39901779488)) |
+| prod | `1.0.1` (8331f57) | `1.0.1` (f60cc62) | `1.0.1` | - |
+
+_Written by the Deploy workflow after each deploy; mobile is what the stores or testers were last given._
 <!-- status:end -->
 
 ## What lives where
