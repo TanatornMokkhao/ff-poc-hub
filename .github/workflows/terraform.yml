@@ -1,8 +1,10 @@
 name: Terraform
 
-# Pull requests: fmt and validate only, no AWS access.
-# main: plan and apply infra/ as ff-poc-terraform through GitHub OIDC (no AWS keys stored),
-# after an approval on the infra environment. infra/bootstrap/ is applied by hand, never here.
+# Pull requests: fmt and validate, then plan as ff-poc-terraform-plan (read only, GitHub OIDC) and
+# post the result as one PR comment, kept up to date on every push, so a reviewer sees what a merge
+# will create, change or destroy. Pull requests from forks get no plan.
+# main: plan again and apply infra/ as ff-poc-terraform through GitHub OIDC (no AWS keys stored).
+# infra/bootstrap/ is applied by hand, never here.
 on:
   pull_request:
     paths: ['infra/**']
@@ -14,9 +16,10 @@ on:
 permissions:
   contents: read
 
+# One queue for applies; each pull request plans in its own.
 concurrency:
-  group: terraform
-  cancel-in-progress: false
+  group: terraform-${{ github.event_name == 'pull_request' && github.event.number || 'apply' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   TF_VERSION: 1.10.5
@@ -36,6 +39,90 @@ jobs:
             terraform -chdir=$d init -backend=false -input=false >/dev/null
             terraform -chdir=$d validate
           done
+
+  plan:
+    needs: check
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+      issues: write
+    defaults:
+      run:
+        working-directory: infra
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.number }}
+      SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="region=${{ vars.AWS_REGION }}"
+
+      # -lock=false: the plan role cannot write the lock file, and a plan changes nothing.
+      - name: Plan
+        id: plan
+        run: |
+          set -uo pipefail
+          terraform plan -input=false -no-color -lock=false -out=tf.plan > plan.txt 2>&1
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          [ "$code" = 0 ] && terraform show -json tf.plan > plan.json
+          cat plan.txt
+          exit 0
+
+      - name: Comment the plan on the pull request
+        run: |
+          set -euo pipefail
+          MARK='<!-- terraform-plan -->'
+          {
+            echo "$MARK"
+            if [ "${{ steps.plan.outputs.code }}" != 0 ]; then
+              echo "### Terraform plan failed"
+              echo
+              echo '```'; tail -40 plan.txt; echo '```'
+            else
+              jq -r '
+                [.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])] as $c
+                | ($c | map(select(.change.actions == ["create"])) | length) as $add
+                | ($c | map(select(.change.actions == ["update"])) | length) as $chg
+                | ($c | map(select(.change.actions == ["delete"])) | length) as $del
+                | ($c | map(select(.change.actions | length == 2)) | length) as $rep
+                | "### Terraform plan: \($add) to add, \($chg) to change, \($rep) to replace, \($del) to destroy",
+                  "",
+                  (if ($del + $rep) > 0 then "> **Warning: this merge deletes or replaces \($del + $rep) resource(s).** Check each one below before merging.\n" else empty end),
+                  (if ($c | length) == 0 then "No changes: merging leaves AWS as it is." else
+                    "| Action | Resource |", "| --- | --- |",
+                    ($c[] | "| \(.change.actions | if . == ["create"] then "create" elif . == ["update"] then "update in place" elif . == ["delete"] then "**destroy**" else "**replace**" end) | `\(.address)` |")
+                  end)' plan.json
+              echo
+              echo "<details><summary>Full plan</summary>"
+              echo
+              echo '```'
+              sed -n '/Terraform will perform\|No changes/,$p' plan.txt | head -c 55000
+              echo '```'
+              echo "</details>"
+            fi
+            echo
+            echo "_Planned for ${SHA::7} as \`ff-poc-terraform-plan\` (read only). Merging plans again and applies; if another infra PR merges first, the result can differ._"
+          } > comment.md
+          if [ "${{ steps.plan.outputs.code }}" = 0 ] && jq -e '[.resource_changes[] | select(.change.actions | index("delete"))] | length > 0' plan.json >/dev/null; then
+            echo "::warning::This pull request deletes or replaces AWS resources; see the plan comment."
+          fi
+          ID=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$MARK\"))) | .id" | head -1)
+          if [ -n "$ID" ]; then gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$ID" -F body=@comment.md >/dev/null
+          else gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@comment.md >/dev/null; fi
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+          [ "${{ steps.plan.outputs.code }}" = 0 ] || { echo "::error::terraform plan failed; see the comment."; exit 1; }
 
   apply:
     needs: check
