@@ -137,11 +137,10 @@ jobs:
             fe) npm ci --no-audit --no-fund && npx vitest run && npm run build ;;
           esac
 
-          case "$(gh api "repos/$REPO/compare/$PROD_PIN...$FIX" --jq .status)" in
-            ahead) ;;
-            identical) echo "::error::${FIX::7} is what prod/v$FROM already ships."; exit 1 ;;
-            *) echo "::error::${FIX::7} does not build on prod/v$FROM's $APP (${PROD_PIN::7})."; exit 1 ;;
-          esac
+          # Checked locally: the new commit is not pushed yet, so GitHub cannot compare it.
+          [ "$FIX" != "$PROD_PIN" ] || { echo "::error::${FIX::7} is what prod/v$FROM already ships."; exit 1; }
+          git merge-base --is-ancestor "$PROD_PIN" "$FIX" \
+            || { echo "::error::${FIX::7} does not build on prod/v$FROM's $APP (${PROD_PIN::7})."; exit 1; }
           [ -n "$PICKED" ] || git push -q origin "$RB"
           { echo "FIX=$FIX"; echo "MAIN_FIX=$MAIN_FIX"; echo "RB=$RB"; } >> "$GITHUB_ENV"
           echo "$APP: ${MAIN_FIX::7} on main -> ${FIX::7} on $RB, tests passed"
