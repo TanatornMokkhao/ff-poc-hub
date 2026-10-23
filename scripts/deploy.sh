@@ -40,9 +40,10 @@ keys() { lines | sed 's/=.*//' | sort -u; }
 # no value; when it has one, a secret must still be SecureString.
 SECRET='#[[:space:]]*secret([[:space:]]+optional)?[[:space:]]*$'
 OPTIONAL='#[^=]*optional[[:space:]]*$'
-secret_keys() { grep -E "$SECRET" | keys; }
-public_keys() { lines | grep -Ev "$SECRET" | keys; }
-optional_keys() { grep -E "$OPTIONAL" | keys; }
+# grep exits 1 on no match, which pipefail turns into a silent stop; no match means no keys.
+secret_keys() { { grep -E "$SECRET" || true; } | keys; }
+public_keys() { lines | { grep -Ev "$SECRET" || true; } | keys; }
+optional_keys() { { grep -E "$OPTIONAL" || true; } | keys; }
 # .env.example of an app at the release being deployed; empty when that release has none.
 # On a 404, gh still prints the error body to stdout, so only a successful call's output counts.
 example() {
