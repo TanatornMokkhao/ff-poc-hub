@@ -50,7 +50,23 @@ jobs:
           FROM="${FROM_INPUT:-$(sed -n 's/^be:[[:space:]]*\([^[:space:]#]*\).*/\1/p' prod/versions.yaml)}"
           [[ "$FROM" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || { echo "::error::'$FROM' is not a prod version X.Y.Z."; exit 1; }
           git rev-parse -q --verify "refs/tags/prod/v$FROM" >/dev/null || { echo "::error::There is no prod/v$FROM."; exit 1; }
-          NEXT="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+          LINE="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          # An unreleased hotfix branch whose every rc is its own takes the next rc. Otherwise the
+          # hotfix gets the patch after every X.Y version tagged so far, staging rcs from main
+          # included, so one version number never names two different sets of code.
+          NEXT=""
+          for v in $(git ls-remote --heads origin "hotfix/$LINE.*" | sed 's#.*refs/heads/hotfix/##' | sort -V); do
+            git rev-parse -q --verify "refs/tags/prod/v$v" >/dev/null && continue
+            own=true
+            for t in $(git tag --list "staging/v$v-rc.*"); do
+              git merge-base --is-ancestor "$t" "origin/hotfix/$v" || own=false
+            done
+            [ "$own" = true ] && NEXT="$v"
+          done
+          if [ -z "$NEXT" ]; then
+            HIGH=$(git tag --list "prod/v$LINE.*" "staging/v$LINE.*" | sed -E 's#^(prod|staging)/v##; s/-rc\.[0-9]+$//' | sort -V | tail -1)
+            NEXT="$LINE.$(( ${HIGH##*.} + 1 ))"
+          fi
           if git rev-parse -q --verify "refs/tags/prod/v$NEXT" >/dev/null; then
             echo "::error::prod/v$NEXT already exists; give 'from' as the newest prod version."; exit 1
           fi
