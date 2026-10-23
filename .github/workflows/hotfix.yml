@@ -1,11 +1,14 @@
 name: Start hotfix
 
-# For when main holds work that cannot ship yet but prod needs a fix now.
-# Before running: in the app repo, branch from the commit prod runs (e.g. release/1.0.x from
-# prod/v1.0.1), commit the fix and push that branch. Then run this with the app and the fix commit.
-# It makes hub branch hotfix/<next patch> from the prod release with only that app's pin moved,
-# and releases staging/v<next>-rc.N from it. Then test staging, use Promote to prod, and bring the
-# fix into the app's main too (cherry-pick), or it comes back in the next release.
+# For when main holds work that cannot ship yet but prod needs a fix now. Fix on main first:
+# merge the fix into the app's main by PR as usual, then run this with that main commit.
+# It cherry-picks the commit onto release/<next patch> in the app repo (cut from what prod runs),
+# runs the app's tests there, makes hub branch hotfix/<next patch> from the prod release with only
+# that app's pin moved, and releases staging/v<next>-rc.N from it. Then test staging and Promote.
+# The fix is already in main, so nothing has to be merged back.
+#
+# Cherry-pick conflicts: pick it by hand on the release branch (git cherry-pick -x), push, and run
+# again with "picked". A fix that cannot come from main at all needs "reason"; Promote shows it.
 on:
   workflow_dispatch:
     inputs:
@@ -14,11 +17,19 @@ on:
         type: choice
         options: [be, fe]
       commit:
-        description: The fix commit in that app's repo (full or short sha)
+        description: The fix commit on the app's main (full or short sha)
         type: string
         required: true
       from:
         description: Prod version to fix (empty = what prod runs now)
+        type: string
+        required: false
+      picked:
+        description: Only after a conflict - your cherry-pick of it on release/<version> (sha)
+        type: string
+        required: false
+      reason:
+        description: Only for a fix that is not on main - why (shown at Promote)
         type: string
         required: false
 
@@ -38,6 +49,8 @@ jobs:
       APP: ${{ inputs.app }}
       COMMIT: ${{ inputs.commit }}
       FROM_INPUT: ${{ inputs.from }}
+      PICKED: ${{ inputs.picked }}
+      REASON: ${{ inputs.reason }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,15 +84,67 @@ jobs:
             echo "::error::prod/v$NEXT already exists; give 'from' as the newest prod version."; exit 1
           fi
           N=$(( $(git tag --list "staging/v$NEXT-rc.*" | wc -l) + 1 ))
-          FIX=$(gh api "repos/$OWNER/ff-poc-$APP/commits/$COMMIT" --jq .sha) || { echo "::error::No commit $COMMIT in ff-poc-$APP."; exit 1; }
           PROD_PIN=$(git ls-tree "prod/v$FROM" "$APP" | awk '{print $3}')
-          case "$(gh api "repos/$OWNER/ff-poc-$APP/compare/$PROD_PIN...$FIX" --jq .status)" in
-            ahead) ;;
-            identical) echo "::error::$COMMIT is what prod/v$FROM already ships."; exit 1 ;;
-            *) echo "::warning::$COMMIT does not build on prod/v$FROM's $APP (${PROD_PIN::7}); it may carry other changes." ;;
+          { echo "FROM=$FROM"; echo "NEXT=$NEXT"; echo "RC=staging/v$NEXT-rc.$N"; echo "PROD_PIN=$PROD_PIN"; } >> "$GITHUB_ENV"
+          echo "Hotfix $FROM -> $NEXT for $APP (prod runs ${PROD_PIN::7}), release staging/v$NEXT-rc.$N"
+
+      - name: Put the main fix on release/${{ env.NEXT }}
+        run: |
+          set -euo pipefail
+          REPO="$OWNER/ff-poc-$APP"
+          RB="release/$NEXT"
+          # A commit is on main when main already contains it.
+          in_main() {
+            local s
+            s=$(gh api "repos/$REPO/compare/main...$1" --jq .status 2>/dev/null) || return 1
+            [ "$s" = behind ] || [ "$s" = identical ]
+          }
+          MAIN_FIX=$(gh api "repos/$REPO/commits/$COMMIT" --jq .sha) || { echo "::error::No commit $COMMIT in ff-poc-$APP."; exit 1; }
+          if ! in_main "$MAIN_FIX"; then
+            [ -n "$REASON" ] || { echo "::error::${MAIN_FIX::7} is not on ff-poc-$APP main. Merge the fix into main first, then run this with that commit (or give 'reason' for a fix main cannot take)."; exit 1; }
+            echo "::warning::${MAIN_FIX::7} is not on main; going ahead because: $REASON"
+          fi
+
+          git clone -q "https://x-access-token:$GH_TOKEN@github.com/$REPO.git" app
+          cd app
+          git config user.name "ff-poc release bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$PICKED" ]; then
+            FIX=$(git rev-parse "$PICKED^{commit}") || { echo "::error::No commit $PICKED in ff-poc-$APP."; exit 1; }
+            git merge-base --is-ancestor "$FIX" "origin/$RB" 2>/dev/null || { echo "::error::${FIX::7} is not on $RB; push your cherry-pick there first."; exit 1; }
+            git log -1 --format=%B "$FIX" | grep -q "cherry picked from commit $MAIN_FIX" \
+              || [ -n "$REASON" ] || { echo "::error::${FIX::7} does not say 'cherry picked from commit $MAIN_FIX' (use git cherry-pick -x)."; exit 1; }
+            git switch -q --detach "$FIX"
+          else
+            if git ls-remote --exit-code --heads origin "$RB" >/dev/null; then git switch -q "$RB"
+            else git switch -q -c "$RB" "$PROD_PIN"; fi
+            if ! git cherry-pick -x "$MAIN_FIX" >/dev/null 2>&1; then
+              CONFLICTS=$(git diff --name-only --diff-filter=U | paste -sd, -)
+              if [ -z "$CONFLICTS" ]; then
+                echo "::error::${MAIN_FIX::7} changes nothing on $RB: the fix is already there."; exit 1
+              fi
+              echo "::error::${MAIN_FIX::7} does not apply cleanly on $RB (conflicts: $CONFLICTS). Pick it by hand: git switch $RB && git cherry-pick -x ${MAIN_FIX::7}, fix, push, then run this again with picked=<your commit>."
+              git cherry-pick --abort
+              git push -q origin "$RB" 2>/dev/null || true
+              exit 1
+            fi
+            FIX=$(git rev-parse HEAD)
+          fi
+
+          # The release branch never ran the app's CI; test what will ship before anything is tagged.
+          case "$APP" in
+            be) npm ci --no-audit --no-fund && npm test ;;
+            fe) npm ci --no-audit --no-fund && npx vitest run && npm run build ;;
           esac
-          { echo "FROM=$FROM"; echo "NEXT=$NEXT"; echo "RC=staging/v$NEXT-rc.$N"; echo "FIX=$FIX"; } >> "$GITHUB_ENV"
-          echo "Hotfix $FROM -> $NEXT: $APP ${PROD_PIN::7} -> ${FIX::7}, release staging/v$NEXT-rc.$N"
+
+          case "$(gh api "repos/$REPO/compare/$PROD_PIN...$FIX" --jq .status)" in
+            ahead) ;;
+            identical) echo "::error::${FIX::7} is what prod/v$FROM already ships."; exit 1 ;;
+            *) echo "::error::${FIX::7} does not build on prod/v$FROM's $APP (${PROD_PIN::7})."; exit 1 ;;
+          esac
+          [ -n "$PICKED" ] || git push -q origin "$RB"
+          { echo "FIX=$FIX"; echo "MAIN_FIX=$MAIN_FIX"; echo "RB=$RB"; } >> "$GITHUB_ENV"
+          echo "$APP: ${MAIN_FIX::7} on main -> ${FIX::7} on $RB, tests passed"
 
       - name: Branch hotfix/${{ env.NEXT }} with the new pin
         run: |
@@ -90,19 +155,24 @@ jobs:
           git update-index --cacheinfo "160000,$FIX,$APP"
           git config user.name "ff-poc release bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -qm "hotfix $NEXT: $APP -> ${FIX::7}"
+          # Promote reads these trailers to confirm the fix came from main.
+          if [ -n "$REASON" ]; then TRAILER="Hotfix-not-on-main: $REASON"; else TRAILER="Fix-from-main: $APP $MAIN_FIX"; fi
+          git commit -qm "hotfix $NEXT: $APP -> ${FIX::7}" -m "$TRAILER"
           git push -q origin "$B"
           echo "B=$B" >> "$GITHUB_ENV"
 
       - name: Release ${{ env.RC }}
         run: |
           set -euo pipefail
+          NOTE="$APP ${FIX::7} on $RB, cherry-picked from main ${MAIN_FIX::7}."
+          [ -z "$REASON" ] || NOTE="$APP ${FIX::7} on $RB, NOT on main: $REASON"
           gh release create "$RC" -R "$GITHUB_REPOSITORY" --target "$B" --title "$RC" --prerelease \
-            --notes "[skip-bump-check] Hotfix of prod/v$FROM: $APP ${FIX::7}, from branch $B."
+            --notes "[skip-bump-check] Hotfix of prod/v$FROM: $NOTE From branch $B."
           {
             echo "### $RC released from $B"
+            echo "$NOTE"
             echo "1. Test staging when the Release and Deploy runs finish."
             echo "2. **Promote to prod** (leave rc empty) creates prod/v$NEXT from this rc."
-            echo "3. Bring ${FIX::7} into ff-poc-$APP main (cherry-pick PR), or the bug returns in the next release."
-            echo "4. Staging now runs the hotfix: release a new rc from main to test main again."
+            echo "3. Staging now runs the hotfix: release a new rc from main to test main again."
+            [ -z "$REASON" ] || echo "4. The fix is not on main: bring it there, or the bug returns in the next release."
           } >> "$GITHUB_STEP_SUMMARY"

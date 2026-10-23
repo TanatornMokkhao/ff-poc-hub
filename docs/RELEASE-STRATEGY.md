@@ -80,10 +80,10 @@ Rollback คือการ revert commit ใน `deploy` repo ส่วน hotf
 
 **Hotfix กรณี main มีของ phase ถัดไปค้างอยู่**:
 
-1. `git checkout -b hotfix/3.2.1 v3.2.0`
-2. แก้บั๊ก แล้ว tag `v3.2.1-rc.1` จาก branch นี้
-3. Test ผ่านแล้ว tag `v3.2.1` และขึ้น prod ตามปกติ
-4. เปิด PR เอา fix กลับเข้า `main` ทันที (ห้ามลืม)
+1. แก้บั๊กบน `main` ก่อนด้วย PR ปกติ (fix on trunk)
+2. Actions → **Start hotfix** ใส่ commit นั้นใน `main`: ระบบ cherry-pick ลง `release/3.2.1` ที่แตกจาก prod (`v3.2.0`), รัน test, แล้ว tag `staging/v3.2.1-rc.1`
+3. Test บน staging ผ่านแล้ว **Promote** ขึ้น prod
+4. ไม่ต้อง merge กลับ: fix อยู่ใน `main` ตั้งแต่ข้อ 1 และ Promote ไม่ยอมถ้ามี commit ที่ไม่อยู่ใน `main`
 
 ## Mobile
 
