@@ -211,8 +211,9 @@ resource "aws_iam_role_policy" "terraform" {
   policy = data.aws_iam_policy_document.terraform.json
 }
 
-# Terraform plan on pull requests: reads what plan refreshes and the state, writes nothing. Plans
-# run with -lock=false, so it needs no write even on the lock file.
+# Terraform plan, on pull requests and on main before the approved apply: reads what plan
+# refreshes and the state, writes nothing. Plans run with -lock=false, so it needs no write even
+# on the lock file.
 data "aws_iam_policy_document" "plan_trust" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -228,7 +229,7 @@ data "aws_iam_policy_document" "plan_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["${var.hub_sub_prefix}:pull_request"]
+      values   = ["${var.hub_sub_prefix}:pull_request", "${var.hub_sub_prefix}:ref:refs/heads/main"]
     }
   }
 }
