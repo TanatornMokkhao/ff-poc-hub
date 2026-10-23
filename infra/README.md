@@ -23,12 +23,17 @@ the machine that applied it (ignored by git).
 - `ff-poc-boundary` caps every such role at: list parameter names, read `/ff-poc/*`, decrypt
   through SSM, push and pull `ff-poc-*` images. Nothing else, whatever policy a role gets.
 
-**`*.tf` here: applied by the Terraform workflow** as soon as a change is merged to `main` (the
-`infra` environment has no approval). Every pull request that touches `infra/` runs `fmt`,
-`validate` and a `terraform plan` as `ff-poc-terraform-plan`, a read-only role (bootstrap) that
-only a pull request job of this repo can assume, and posts the plan as one comment on the pull
-request: what the merge will create, change, replace or destroy, with a warning when anything is
-deleted. Read that comment before merging. Pull requests from forks get no plan.
+**`*.tf` here: applied by the Terraform workflow**, twice checked by a person:
+
+1. Every pull request that touches `infra/` runs `fmt`, `validate` and a `terraform plan` as
+   `ff-poc-terraform-plan`, a read-only role (bootstrap) that only this repo's pull request jobs and
+   `main` can assume, and posts the plan as one comment on the pull request: what the merge will
+   create, change, replace or destroy, with a warning when anything is deleted. Pull requests from
+   forks get no plan.
+2. After the merge, `main` plans again (read only) and shows it in the run summary. When it changes
+   anything, the apply waits for an approval on the `infra` environment, then applies that saved
+   plan file as `ff-poc-terraform`: what was approved is exactly what runs, and Terraform refuses a
+   plan made stale by another change. Nothing to change, no approval asked.
 
 | Made here | Who uses it | Can do |
 | --- | --- | --- |
