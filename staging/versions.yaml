@@ -1,4 +1,4 @@
 # What staging runs. App repos commit here directly when they tag an rc.
-be: 1.0.2-rc.1   # 7e5230e
-fe: 1.0.2-rc.1   # 810df54
-mobile: 1.0.2-rc.1   # reference only; the app ships through the stores
+be: 1.0.2-rc.2   # 9d76fab
+fe: 1.0.2-rc.2   # f60cc62
+mobile: 1.0.2-rc.2   # reference only; the app ships through the stores
