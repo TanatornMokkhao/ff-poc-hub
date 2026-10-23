@@ -23,8 +23,12 @@ the machine that applied it (ignored by git).
 - `ff-poc-boundary` caps every such role at: list parameter names, read `/ff-poc/*`, decrypt
   through SSM, push and pull `ff-poc-*` images. Nothing else, whatever policy a role gets.
 
-**`*.tf` here: applied by the Terraform workflow** after a merge to `main` and an approval on
-`infra`. Pull requests only run `fmt` and `validate`.
+**`*.tf` here: applied by the Terraform workflow** as soon as a change is merged to `main` (the
+`infra` environment has no approval). Every pull request that touches `infra/` runs `fmt`,
+`validate` and a `terraform plan` as `ff-poc-terraform-plan`, a read-only role (bootstrap) that
+only a pull request job of this repo can assume, and posts the plan as one comment on the pull
+request: what the merge will create, change, replace or destroy, with a warning when anything is
+deleted. Read that comment before merging. Pull requests from forks get no plan.
 
 | Made here | Who uses it | Can do |
 | --- | --- | --- |

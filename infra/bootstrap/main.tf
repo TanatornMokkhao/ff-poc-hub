@@ -211,6 +211,82 @@ resource "aws_iam_role_policy" "terraform" {
   policy = data.aws_iam_policy_document.terraform.json
 }
 
+# Terraform plan on pull requests: reads what plan refreshes and the state, writes nothing. Plans
+# run with -lock=false, so it needs no write even on the lock file.
+data "aws_iam_policy_document" "plan_trust" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["${var.hub_sub_prefix}:pull_request"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "plan" {
+  statement {
+    sid       = "ReadIam"
+    actions   = ["iam:Get*", "iam:List*"]
+    resources = ["*"]
+  }
+  statement {
+    sid       = "ReadEcr"
+    actions   = ["ecr:DescribeRepositories", "ecr:ListTagsForResource", "ecr:GetLifecyclePolicy", "ecr:GetRepositoryPolicy"]
+    resources = ["*"]
+  }
+  statement {
+    sid       = "ReadBuckets"
+    actions   = ["s3:GetBucket*", "s3:GetAccelerateConfiguration", "s3:GetLifecycleConfiguration", "s3:GetReplicationConfiguration", "s3:GetEncryptionConfiguration", "s3:GetObjectLockConfiguration", "s3:ListBucket"]
+    resources = ["arn:aws:s3:::${local.prefix}-*"]
+  }
+  statement {
+    sid       = "ReadState"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.state.arn}/*"]
+  }
+  statement {
+    sid       = "ReadCdn"
+    actions   = ["cloudfront:Get*", "cloudfront:List*"]
+    resources = ["*"]
+  }
+  # Written out so that no later Allow can turn this role into a writer.
+  statement {
+    sid    = "NeverWrite"
+    effect = "Deny"
+    actions = [
+      "iam:Create*", "iam:Delete*", "iam:Put*", "iam:Update*", "iam:Attach*", "iam:Detach*", "iam:Tag*",
+      "iam:Untag*", "iam:PassRole", "iam:SetDefaultPolicyVersion", "s3:Put*", "s3:Delete*", "s3:Replicate*",
+      "ecr:Put*", "ecr:Delete*", "ecr:BatchDelete*", "ecr:Create*", "ecr:Set*", "ecr:Tag*", "ecr:Untag*",
+      "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload", "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer", "cloudfront:Create*", "cloudfront:Update*", "cloudfront:Delete*",
+      "cloudfront:Tag*", "cloudfront:Untag*", "ssm:*", "kms:*",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role" "plan" {
+  name                 = "${local.prefix}-terraform-plan"
+  assume_role_policy   = data.aws_iam_policy_document.plan_trust.json
+  max_session_duration = 3600
+}
+
+resource "aws_iam_role_policy" "plan" {
+  name   = "plan"
+  role   = aws_iam_role.plan.id
+  policy = data.aws_iam_policy_document.plan.json
+}
+
 resource "aws_s3_bucket" "state" {
   bucket = local.bucket
 }
@@ -241,6 +317,10 @@ resource "aws_s3_bucket_public_access_block" "state" {
 
 output "terraform_role_arn" {
   value = aws_iam_role.terraform.arn
+}
+
+output "terraform_plan_role_arn" {
+  value = aws_iam_role.plan.arn
 }
 
 output "boundary_arn" {
